@@ -28,6 +28,7 @@ program
           repoPath,
           topN: Number.parseInt(opts.topN, 10),
           maxTokens: 50000,
+          generatePdf: false,
         });
         await writeFile(opts.out, report, "utf8");
         console.error(`Report written to ${opts.out}`);

@@ -8,18 +8,20 @@ import { parseFile, computeComplexity } from "./parser.js";
 import { buildGraph, type FileEntry } from "./graph.js";
 import { computeRiskScores } from "./metrics.js";
 import { buildContextPack } from "./summarizer.js";
-import { generateReport } from "./reasoning.js";
+import { generateReport, generateSimplifiedSummary } from "./reasoning.js";
 import type { CodeGraph } from "./types.js";
 
 export interface PipelineOptions {
   repoPath: string;
   topN: number;
   maxTokens: number;
+  generatePdf: boolean;
 }
 
 export interface PipelineResult {
   report: string;
   graph: CodeGraph;
+  simplifiedSummary?: string;
 }
 
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
@@ -60,5 +62,10 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const client = new Anthropic({ apiKey });
   const report = await generateReport(client, pack);
 
-  return { report, graph };
+  let simplifiedSummary: string | undefined;
+  if (options.generatePdf) {
+    simplifiedSummary = await generateSimplifiedSummary(client, report);
+  }
+
+  return { report, graph, simplifiedSummary };
 }
