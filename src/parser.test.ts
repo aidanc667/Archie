@@ -18,6 +18,12 @@ describe("computeComplexity", () => {
   it("counts branches, loops, and conditionals", async () => {
     const filePath = path.resolve("fixtures/parser-basic/branchy.ts");
     const complexity = await computeComplexity(filePath);
-    expect(complexity).toBeGreaterThanOrEqual(3);
+    expect(complexity).toBe(5);
+  });
+
+  it("counts && and || operators", async () => {
+    const filePath = path.resolve("fixtures/parser-basic/logical.ts");
+    const complexity = await computeComplexity(filePath);
+    expect(complexity).toBe(3);
   });
 });

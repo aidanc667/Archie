@@ -44,6 +44,17 @@ function languageFor(filePath: string): Parser.Language {
   return jsLanguage!;
 }
 
+function walkTree(
+  node: Parser.SyntaxNode,
+  visit: (node: Parser.SyntaxNode) => void
+): void {
+  visit(node);
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child) walkTree(child, visit);
+  }
+}
+
 export async function parseFile(filePath: string): Promise<ParsedFile> {
   await ensureInitialized();
   const source = await readFile(filePath, "utf8");
@@ -56,7 +67,7 @@ export async function parseFile(filePath: string): Promise<ParsedFile> {
   const classes: ParsedClass[] = [];
   const imports: string[] = [];
 
-  function walk(node: Parser.SyntaxNode): void {
+  walkTree(tree.rootNode, (node) => {
     if (node.type === "function_declaration") {
       const nameNode = node.childForFieldName("name");
       if (nameNode) {
@@ -81,14 +92,7 @@ export async function parseFile(filePath: string): Promise<ParsedFile> {
         imports.push(sourceNode.text.slice(1, -1));
       }
     }
-
-    for (let i = 0; i < node.childCount; i++) {
-      const child = node.child(i);
-      if (child) walk(child);
-    }
-  }
-
-  walk(tree.rootNode);
+  });
 
   return { functions, classes, imports };
 }
@@ -102,7 +106,6 @@ const BRANCH_NODE_TYPES = new Set([
   "case_clause",
   "catch_clause",
   "ternary_expression",
-  "binary_expression", // counted only for && / || below
 ]);
 
 export async function computeComplexity(filePath: string): Promise<number> {
@@ -115,22 +118,15 @@ export async function computeComplexity(filePath: string): Promise<number> {
 
   let complexity = 1; // base complexity
 
-  function walk(node: Parser.SyntaxNode): void {
+  walkTree(tree.rootNode, (node) => {
     if (node.type === "binary_expression") {
       const operator = node.children.find(
         (c) => c.type === "&&" || c.type === "||"
       );
       if (operator) complexity += 1;
-    } else if (BRANCH_NODE_TYPES.has(node.type) && node.type !== "binary_expression") {
+    } else if (BRANCH_NODE_TYPES.has(node.type)) {
       complexity += 1;
     }
-
-    for (let i = 0; i < node.childCount; i++) {
-      const child = node.child(i);
-      if (child) walk(child);
-    }
-  }
-
-  walk(tree.rootNode);
+  });
   return complexity;
 }
