@@ -26,7 +26,7 @@ export interface ClassNode {
 
 export type GraphNode = FileNode | FunctionNode | ClassNode;
 
-export type EdgeType = "CONTAINS" | "IMPORTS" | "CALLS" | "EXPORTS";
+export type EdgeType = "CONTAINS" | "IMPORTS" | "CALLS" | "EXPORTS" | "TESTED_BY";
 
 export interface Edge {
   type: EdgeType;

@@ -12,4 +12,9 @@ describe("graph types", () => {
     const edge: Edge = { type: "IMPORTS", from: "f1", to: "f2", confidence: 1.0 };
     expect(edge.confidence).toBe(1.0);
   });
+
+  it("allows TESTED_BY as a valid edge type", () => {
+    const edge: Edge = { type: "TESTED_BY", from: "file:a.ts", to: "file:a.test.ts", confidence: 1.0 };
+    expect(edge.type).toBe("TESTED_BY");
+  });
 });
