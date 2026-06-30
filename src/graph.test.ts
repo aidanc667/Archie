@@ -65,4 +65,32 @@ describe("buildGraph", () => {
     expect(importEdges[0].from).toBe("file:src/a.ts");
     expect(importEdges[0].to).toBe("file:src/b.ts");
   });
+
+  it("deduplicates IMPORTS edges when a file imports the same target via multiple import statements", () => {
+    const parsedByFile = new Map<string, { loc: number; parsed: ParsedFile }>([
+      [
+        "/repo/src/a.ts",
+        {
+          loc: 10,
+          parsed: {
+            functions: [],
+            classes: [],
+            // e.g. a value import and a separate type-only import from the same file
+            imports: ["./b", "./b"],
+          },
+        },
+      ],
+      [
+        "/repo/src/b.ts",
+        { loc: 5, parsed: { functions: [], classes: [], imports: [] } },
+      ],
+    ]);
+
+    const graph = buildGraph(parsedByFile, "/repo");
+
+    const importEdges = graph.edges.filter((e) => e.type === "IMPORTS");
+    expect(importEdges).toHaveLength(1);
+    expect(importEdges[0].from).toBe("file:src/a.ts");
+    expect(importEdges[0].to).toBe("file:src/b.ts");
+  });
 });

@@ -82,14 +82,21 @@ export function buildGraph(
     }
   }
 
-  // Pass 3: resolve IMPORTS edges
+  // Pass 3: resolve IMPORTS edges, deduplicated per (from, to) pair —
+  // a file can have multiple import statements (e.g. a value import and a
+  // separate type-only import) targeting the same file, which should still
+  // count as a single dependency edge, not inflate fan-in.
   for (const [absPath, entry] of parsedByFile) {
     const fileId = fileIdByAbsPath.get(absPath)!;
+    const resolvedTargets = new Set<string>();
     for (const importSpecifier of entry.parsed.imports) {
       const targetId = resolveImport(absPath, importSpecifier, fileIdByAbsPath);
       if (targetId) {
-        edges.push({ type: "IMPORTS", from: fileId, to: targetId, confidence: 1.0 });
+        resolvedTargets.add(targetId);
       }
+    }
+    for (const targetId of resolvedTargets) {
+      edges.push({ type: "IMPORTS", from: fileId, to: targetId, confidence: 1.0 });
     }
   }
 
