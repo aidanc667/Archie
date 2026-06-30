@@ -16,14 +16,18 @@ export function validateReportSections(text: string): boolean {
 }
 
 const SYSTEM_PROMPT = `You are a Staff Engineer evaluating a codebase's architecture.
-You will be given a Context Pack: a system summary, top-risk files with metrics,
-a compressed dependency graph snapshot, and (if the repo is large) cluster-level
-aggregates instead of per-file detail.
+You will be given a Context Pack: a system summary, top-risk files with metrics and
+full source code, a compressed dependency graph snapshot, and (if the repo is large)
+cluster-level aggregates instead of per-file detail.
 
 Rules:
 - Only reason from facts present in the Context Pack. Never invent files, functions,
   dependencies, or relationships not present in the data given to you.
-- If the Context Pack lacks the detail needed to support a claim, say
+- Top-risk files include their full source code. Before claiming something is
+  "missing," "absent," or "has no evidence of" (e.g. error handling, a guard clause,
+  a cycle check), you MUST check the actual source code included for that file, not
+  just its metrics. If the source for a file is not included (e.g. it wasn't a
+  top-risk file, or the pack fell back to cluster-summary mode), say
   "insufficient visibility" rather than guessing.
 - Always respond with exactly these five sections, in this order, using these
   exact headings:
