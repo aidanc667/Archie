@@ -45,19 +45,23 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
 
   const parsedByFile = new Map<string, FileEntry>();
   const complexityByFile = new Map<string, number>();
+  const sourceByPath = new Map<string, string>();
 
   for (const filePath of files) {
     const parsed = await parseFile(filePath);
     const complexity = await computeComplexity(filePath);
-    const loc = (await readFile(filePath, "utf8")).split("\n").length;
+    const source = await readFile(filePath, "utf8");
+    const loc = source.split("\n").length;
 
+    const fileId = `file:${path.relative(root, filePath)}`;
     parsedByFile.set(filePath, { loc, parsed });
-    complexityByFile.set(`file:${path.relative(root, filePath)}`, complexity);
+    complexityByFile.set(fileId, complexity);
+    sourceByPath.set(fileId, source);
   }
 
   const graph = buildGraph(parsedByFile, root);
   const scores = computeRiskScores(graph, complexityByFile);
-  const pack = buildContextPack(graph, scores, { topN: options.topN, maxTokens: options.maxTokens });
+  const pack = buildContextPack(graph, scores, sourceByPath, { topN: options.topN, maxTokens: options.maxTokens });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
