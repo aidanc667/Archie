@@ -46,7 +46,16 @@ ${ABSENCE_CLAIM_RULE}
 3. Production Failure Scenarios
 4. Refactor Plan (step-by-step)
 5. Senior Engineer Verdict
-Do not add, omit, or reorder sections.`;
+Do not add, omit, or reorder sections.
+
+Section 4 formatting rule — each step MUST follow this exact format:
+
+**Step N: [what this step does]**
+File: \`path/to/file.ts\`
+> **Paste this into Claude Code:**
+> [A self-contained imperative instruction an AI coding agent can execute without any other context. Include: the file path, the specific function or section to change, exactly what to change and why, and the acceptance criterion. Do not write prose — write a direct agent instruction. Example: "In \`src/metrics.ts\`, in the \`computeDependencyDepth\` function, replace the recursive \`depthOf\` DFS with an iterative Kahn's algorithm so that repos with 10,000+ import chains don't crash with a stack overflow. The function should return the same depth values as before for acyclic graphs, and return 0 for all nodes in a cycle."]
+
+Every step needs a File and a paste-ready agent prompt. No vague steps like "refactor X for clarity" — each must be specific enough that an engineer could hand it to Claude Code and get a correct implementation without reading anything else.`;
 
 function extractTextBlock(response: Anthropic.Messages.Message): string {
   const textBlock = response.content.find((block) => block.type === "text");
