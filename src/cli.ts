@@ -31,7 +31,7 @@ program
         const result = await runPipeline({
           repoPath,
           topN: Number.parseInt(opts.topN, 10),
-          maxTokens: 50000,
+          maxTokens: 200000,
           generatePdf: false,
         });
         report = result.report;
