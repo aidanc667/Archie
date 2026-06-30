@@ -1,6 +1,6 @@
 // src/metrics.test.ts
 import { describe, it, expect } from "vitest";
-import { computeFanInOut, computeRiskScores } from "./metrics.js";
+import { computeFanInOut, computeRiskScores, computeDependencyDepth } from "./metrics.js";
 import type { CodeGraph } from "./types.js";
 
 describe("computeFanInOut", () => {
@@ -20,6 +20,44 @@ describe("computeFanInOut", () => {
     const result = computeFanInOut(graph);
     expect(result.get("file:b.ts")).toEqual({ fanIn: 2, fanOut: 0 });
     expect(result.get("file:a.ts")).toEqual({ fanIn: 0, fanOut: 1 });
+  });
+});
+
+describe("computeDependencyDepth", () => {
+  it("computes increasing depth along a linear import chain (a -> b -> c)", () => {
+    const graph: CodeGraph = {
+      nodes: [
+        { kind: "file", id: "file:a.ts", path: "a.ts", loc: 10 },
+        { kind: "file", id: "file:b.ts", path: "b.ts", loc: 10 },
+        { kind: "file", id: "file:c.ts", path: "c.ts", loc: 10 },
+      ],
+      edges: [
+        { type: "IMPORTS", from: "file:a.ts", to: "file:b.ts", confidence: 1.0 },
+        { type: "IMPORTS", from: "file:b.ts", to: "file:c.ts", confidence: 1.0 },
+      ],
+    };
+
+    const result = computeDependencyDepth(graph);
+    expect(result.get("file:c.ts")).toBe(0);
+    expect(result.get("file:b.ts")).toBe(1);
+    expect(result.get("file:a.ts")).toBe(2);
+  });
+
+  it("terminates and returns finite depths for a mutual import cycle (a -> b -> a)", () => {
+    const graph: CodeGraph = {
+      nodes: [
+        { kind: "file", id: "file:a.ts", path: "a.ts", loc: 10 },
+        { kind: "file", id: "file:b.ts", path: "b.ts", loc: 10 },
+      ],
+      edges: [
+        { type: "IMPORTS", from: "file:a.ts", to: "file:b.ts", confidence: 1.0 },
+        { type: "IMPORTS", from: "file:b.ts", to: "file:a.ts", confidence: 1.0 },
+      ],
+    };
+
+    const result = computeDependencyDepth(graph);
+    expect(result.get("file:a.ts")).toBe(2);
+    expect(result.get("file:b.ts")).toBe(1);
   });
 });
 
