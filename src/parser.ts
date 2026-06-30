@@ -92,3 +92,45 @@ export async function parseFile(filePath: string): Promise<ParsedFile> {
 
   return { functions, classes, imports };
 }
+
+const BRANCH_NODE_TYPES = new Set([
+  "if_statement",
+  "for_statement",
+  "for_in_statement",
+  "while_statement",
+  "do_statement",
+  "case_clause",
+  "catch_clause",
+  "ternary_expression",
+  "binary_expression", // counted only for && / || below
+]);
+
+export async function computeComplexity(filePath: string): Promise<number> {
+  await ensureInitialized();
+  const source = await readFile(filePath, "utf8");
+
+  const parser = new Parser();
+  parser.setLanguage(languageFor(filePath));
+  const tree = parser.parse(source);
+
+  let complexity = 1; // base complexity
+
+  function walk(node: Parser.SyntaxNode): void {
+    if (node.type === "binary_expression") {
+      const operator = node.children.find(
+        (c) => c.type === "&&" || c.type === "||"
+      );
+      if (operator) complexity += 1;
+    } else if (BRANCH_NODE_TYPES.has(node.type) && node.type !== "binary_expression") {
+      complexity += 1;
+    }
+
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i);
+      if (child) walk(child);
+    }
+  }
+
+  walk(tree.rootNode);
+  return complexity;
+}
