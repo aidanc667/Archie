@@ -38,4 +38,31 @@ describe("buildGraph", () => {
     expect(importEdges).toHaveLength(1);
     expect(importEdges[0].confidence).toBe(1.0);
   });
+
+  it("resolves NodeNext-style imports that use a .js extension pointing at a .ts source file", () => {
+    const parsedByFile = new Map<string, { loc: number; parsed: ParsedFile }>([
+      [
+        "/repo/src/a.ts",
+        {
+          loc: 10,
+          parsed: {
+            functions: [],
+            classes: [],
+            imports: ["./b.js"],
+          },
+        },
+      ],
+      [
+        "/repo/src/b.ts",
+        { loc: 5, parsed: { functions: [], classes: [], imports: [] } },
+      ],
+    ]);
+
+    const graph = buildGraph(parsedByFile, "/repo");
+
+    const importEdges = graph.edges.filter((e) => e.type === "IMPORTS");
+    expect(importEdges).toHaveLength(1);
+    expect(importEdges[0].from).toBe("file:src/a.ts");
+    expect(importEdges[0].to).toBe("file:src/b.ts");
+  });
 });

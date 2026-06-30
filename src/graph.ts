@@ -16,7 +16,12 @@ function resolveImport(
   if (!importSpecifier.startsWith(".")) return undefined;
 
   const baseDir = path.dirname(fromFile);
-  const candidateBase = path.resolve(baseDir, importSpecifier);
+  const resolved = path.resolve(baseDir, importSpecifier);
+  const knownExtensions = [".ts", ".tsx", ".js", ".jsx"];
+  const matchedExtension = knownExtensions.find((ext) => resolved.endsWith(ext));
+  const candidateBase = matchedExtension
+    ? resolved.slice(0, -matchedExtension.length)
+    : resolved;
   const extensions = ["", ".ts", ".tsx", ".js", ".jsx"];
 
   for (const ext of extensions) {
