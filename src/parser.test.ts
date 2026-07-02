@@ -8,7 +8,7 @@ describe("parseFile", () => {
     const filePath = path.resolve("fixtures/parser-basic/sample.ts");
     const result = await parseFile(filePath);
 
-    expect(result.functions.map((f) => f.name)).toEqual(["doWork"]);
+    expect(result.functions.map((f) => f.name)).toEqual(["doWork", "run"]);
     expect(result.classes.map((c) => c.name)).toEqual(["Worker"]);
     expect(result.imports).toEqual(["./helper"]);
   });

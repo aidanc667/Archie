@@ -6,7 +6,7 @@ import type { Ignore } from "ignore";
 
 const ignore = ignorePkg as unknown as (options?: unknown) => Ignore;
 
-const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
+const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".py"]);
 const ALWAYS_EXCLUDED = new Set(["node_modules", ".git"]);
 
 async function loadIgnore(root: string): Promise<Ignore> {
