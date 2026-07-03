@@ -451,6 +451,17 @@ Cover EVERY risk listed in the technical report's "Top Architectural Risks" sect
 **[Short name for the concern]**
 [2-3 sentences. What is the risk in plain business terms? What could go wrong for users, the product, or the company? What would it look like if this became a real problem? No file names, no line numbers, no metrics — only business consequences.]
 
+If the technical report attaches a confidence caveat to this risk (a line starting with "*Confidence:" noting it's based on a partial view or graph structure alone, not full source), end this concern with one plain-English sentence carrying that caveat forward — e.g. "This one is based on a partial read of the file and is worth a closer look before acting on it." Do not use the words "confidence," "medium," or "low" — translate the caveat's meaning, not its technical framing. If the technical report shows no such caveat for a risk (i.e. it was fully verified against source), add nothing — do not manufacture uncertainty that isn't there.
+
+---
+
+## What Could Go Wrong
+
+Translate EVERY scenario in the technical report's "Production Failure Scenarios" section (there are always exactly 3) into a short, concrete story in plain English. Each follows this structure:
+
+**[Short name for the scenario]**
+[2-3 sentences combining the trigger and the chain of failure into a plain narrative — what specific situation sets this off, and what happens next for the user or the business. No file names, no function names — describe the situation and the consequence, not the code path.]
+
 ---
 
 ## What Should Happen Next
@@ -469,8 +480,8 @@ Translate EVERY step in the technical report's "Refactor Plan" section into one 
 
 Rules:
 - No jargon. No file paths. No function names. No metrics or scores.
-- Every concern and recommendation must trace back to something in the technical report — do not invent.
-- Completeness matters more than brevity: a reader who only sees this summary should learn about every risk and every recommended action from the technical report, just without the technical detail. Do not omit findings to keep this short.
+- Every concern, scenario, and recommendation must trace back to something in the technical report — do not invent.
+- Completeness matters more than brevity: a reader who only sees this summary should learn about every risk, every failure scenario, and every recommended action from the technical report, just without the technical detail. Do not omit findings to keep this short.
 - Tone: direct, professional, honest. Not alarmist, not reassuring for the sake of it.
 - Every section heading must appear exactly as shown above.`;
 
