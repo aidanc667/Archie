@@ -515,10 +515,24 @@ export async function generateSimplifiedSummary(
 ): Promise<{ summary: string; usage: TokenUsage }> {
   const response = await client.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 2048,
+    max_tokens: 4096,
     system: SIMPLIFIED_SUMMARY_SYSTEM_PROMPT,
     messages: [{ role: "user", content: technicalReport }],
   });
+
+  // Same failure class already found in generateReport's risk-extraction pass:
+  // the simplified summary now translates every risk, every failure scenario,
+  // and every refactor step (not a fixed 2-3 item teaser), so its output size
+  // scales with the technical report instead of being roughly constant. A
+  // truncated response here doesn't produce a parse error -- it produces a
+  // plausible-looking PDF that just stops mid-sentence (and can leave a
+  // dangling, unrendered "**" where a bold span never found its closing pair).
+  // Fail loudly instead of shipping a broken file.
+  if (response.stop_reason === "max_tokens") {
+    throw new Error(
+      "Claude's simplified-summary response was truncated (hit the max_tokens limit) before completing. This can happen on reports with many risks/scenarios/steps to translate."
+    );
+  }
 
   const text = extractTextBlock(response);
 
