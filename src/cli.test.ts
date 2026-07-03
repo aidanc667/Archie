@@ -1,8 +1,14 @@
 // src/cli.test.ts
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import path from "node:path";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { runPipeline } from "./index.js";
 import type { ArchieJsonOutput } from "./cli.js";
+
+const execFileAsync = promisify(execFile);
 
 describe("runPipeline", () => {
   it("throws a clear error when the path does not exist", async () => {
@@ -16,6 +22,73 @@ describe("runPipeline", () => {
     await expect(
       runPipeline({ repoPath: emptyDir, topN: 5, maxTokens: 50000, generatePdf: false })
     ).rejects.toThrow(/No parseable/);
+  });
+});
+
+describe("archie fix (CLI integration)", () => {
+  it("shows the fix command and its flags in help output", async () => {
+    const cliPath = path.resolve("dist/cli.js");
+    const { stdout } = await execFileAsync("node", [cliPath, "--help"]);
+    expect(stdout).toContain("fix");
+  });
+
+  it("shows the --report flag in `fix --help` output", async () => {
+    const cliPath = path.resolve("dist/cli.js");
+    const { stdout } = await execFileAsync("node", [cliPath, "fix", "--help"]);
+    expect(stdout).toContain("--report");
+    expect(stdout).toContain("--verbose");
+  });
+
+  describe("with a clean, isolated git repo fixture", () => {
+    let cleanRepoDir: string;
+
+    beforeAll(() => {
+      // Use an isolated temp git repo (not fixtures/parser-basic, which lives
+      // inside this repo's own working tree and would trip the dirty-tree
+      // check depending on the outer repo's current git status).
+      cleanRepoDir = mkdtempSync(path.join(tmpdir(), "archie-fix-cli-test-"));
+      execFileSync("git", ["init"], { cwd: cleanRepoDir });
+      execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: cleanRepoDir });
+      execFileSync("git", ["config", "user.name", "Test"], { cwd: cleanRepoDir });
+      execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: cleanRepoDir });
+    });
+
+    afterAll(() => {
+      rmSync(cleanRepoDir, { recursive: true, force: true });
+    });
+
+    it("exits non-zero with a clear message when --report points to a non-existent file", async () => {
+      const cliPath = path.resolve("dist/cli.js");
+      const nonexistentReport = path.join(cleanRepoDir, "does-not-exist-report.md");
+
+      await expect(
+        execFileAsync("node", [cliPath, "fix", cleanRepoDir, "--report", nonexistentReport])
+      ).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining("report file not found"),
+      });
+    });
+
+    it("does not treat an untracked .archie-cache/ directory as a dirty working tree", async () => {
+      const cliPath = path.resolve("dist/cli.js");
+      const cacheDir = path.join(cleanRepoDir, ".archie-cache");
+      const { mkdirSync, writeFileSync } = await import("node:fs");
+      mkdirSync(cacheDir, { recursive: true });
+      writeFileSync(path.join(cacheDir, "history.json"), "{}", "utf8");
+
+      const nonexistentReport = path.join(cleanRepoDir, "does-not-exist-report.md");
+
+      // If the dirty-tree check still refused, the error would mention
+      // "dirty working tree" instead of getting past it to the report check.
+      await expect(
+        execFileAsync("node", [cliPath, "fix", cleanRepoDir, "--report", nonexistentReport])
+      ).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining("report file not found"),
+      });
+
+      rmSync(cacheDir, { recursive: true, force: true });
+    });
   });
 });
 

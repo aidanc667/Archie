@@ -2,8 +2,8 @@
 // src/cli.ts
 import { Command } from "commander";
 import { writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { execSync, execFileSync } from "node:child_process";
 import { runPipeline } from "./index.js";
 import type { GraphNode, Edge } from "./types.js";
 
@@ -198,5 +198,118 @@ program
       }
     }
   );
+
+program
+  .command("fix")
+  .argument("<repo>", "path to the target repository")
+  .requiredOption("--report <path>", "path to an already-generated ARCHIE report markdown file")
+  .option("--verbose", "print pipeline progress to stderr", false)
+  .action(async (repoArg: string, opts: { report: string; verbose: boolean }) => {
+    const { resolve } = await import("node:path");
+    const resolvedRepo = resolve(repoArg);
+
+    try {
+      let status: string;
+      try {
+        status = execFileSync("git", ["status", "--porcelain"], { cwd: resolvedRepo, encoding: "utf8" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`failed to check git status in ${resolvedRepo}: ${message}`);
+      }
+      // Ignore ARCHIE's own cache directory when deciding if the tree is dirty.
+      // `archie analyze` leaves an untracked `.archie-cache/` behind in the
+      // target repo; without this filter, running `fix` right after `analyze`
+      // on the same repo would always refuse to start, even though nothing
+      // the user did made the tree dirty.
+      const meaningfulStatus = status
+        .split("\n")
+        .filter((line) => line.trim().length > 0 && !line.includes(".archie-cache"))
+        .join("\n");
+      if (meaningfulStatus.trim().length > 0) {
+        console.error(
+          `archie: refusing to run fix on a dirty working tree in ${resolvedRepo} — commit or stash your changes first.`
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      if (!existsSync(opts.report)) {
+        console.error(`archie: report file not found: ${opts.report}`);
+        process.exitCode = 1;
+        return;
+      }
+      const reportMarkdown = readFileSync(opts.report, "utf8");
+
+      const { parseRefactorSteps, runFixStep } = await import("./fix.js");
+      const steps = parseRefactorSteps(reportMarkdown);
+      if (steps.length === 0) {
+        console.error(`archie: no Refactor Plan steps found in ${opts.report}`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const { createInterface } = await import("node:readline/promises");
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+
+      let appliedCount = 0;
+      let revertedCount = 0;
+      let failedCount = 0;
+
+      try {
+        for (let i = 0; i < steps.length; i++) {
+          const step = steps[i];
+          console.error(`[fix] Step ${i + 1}/${steps.length}: ${step.title}`);
+
+          const result = await runFixStep(step, resolvedRepo, opts.verbose);
+
+          if (result.agentSucceeded) {
+            console.error("[fix] agent: succeeded");
+          } else {
+            console.error(`[fix] agent: failed — ${result.agentError ?? "unknown error"}`);
+          }
+          console.error(`[fix] build: ${result.buildResult}`);
+          console.error(`[fix] test: ${result.testResult}`);
+          if (result.syntaxCheckResult !== "not-applicable") {
+            console.error(
+              `[fix] syntax check (fallback, no build/test script found): ${result.syntaxCheckResult}`
+            );
+          }
+          if (result.diffStat.trim().length > 0) {
+            console.error(`[fix] diff stat:\n${result.diffStat}`);
+          }
+
+          if (!result.agentSucceeded) {
+            execFileSync("git", ["checkout", "--", "."], { cwd: resolvedRepo, encoding: "utf8" });
+            console.error("[fix] reverted changes for this step");
+            failedCount++;
+            continue;
+          }
+
+          const answer = await rl.question("Apply this change? [y/N] ");
+          if (answer.trim() === "y" || answer.trim() === "Y") {
+            appliedCount++;
+          } else {
+            execFileSync("git", ["checkout", "--", "."], { cwd: resolvedRepo, encoding: "utf8" });
+            console.error("[fix] reverted changes for this step");
+            revertedCount++;
+          }
+        }
+      } finally {
+        rl.close();
+      }
+
+      console.error("");
+      console.error(
+        `[fix] summary: ${appliedCount} applied (uncommitted), ${revertedCount} reverted, ${failedCount} failed`
+      );
+      console.error(
+        "[fix] nothing was committed — review `git diff` in the repo yourself before committing."
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`archie: ${message}`);
+      process.exitCode = 1;
+    }
+  });
 
 program.parse();
