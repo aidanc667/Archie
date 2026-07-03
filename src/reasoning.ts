@@ -422,7 +422,7 @@ Write exactly these four sections with these exact headings (no section 2):
 
 const MIN_SUMMARY_LENGTH = 100;
 
-const SIMPLIFIED_SUMMARY_SYSTEM_PROMPT = `You are translating a technical software architecture report into a polished, professional summary for a non-technical reader — a founder, product manager, or investor who needs to understand the health of the product, not the code.
+const SIMPLIFIED_SUMMARY_SYSTEM_PROMPT = `You are translating a technical software architecture report into a complete, polished, professional summary for a non-technical reader — a founder, product manager, or investor who needs the full picture of the product's health, not the code, and should not need to read the technical report to get it.
 
 Use EXACTLY this markdown structure (headings must appear word-for-word as shown):
 
@@ -444,9 +444,9 @@ Use EXACTLY this markdown structure (headings must appear word-for-word as shown
 
 ---
 
-## The Top Concerns
+## The Concerns
 
-Write 2-3 concerns. Each follows this structure:
+Cover EVERY risk listed in the technical report's "Top Architectural Risks" section — do not select a subset. Match its count exactly (if it lists 5, write 5; if fewer, write that many) and keep the same most-to-least-severe order. Each follows this structure:
 
 **[Short name for the concern]**
 [2-3 sentences. What is the risk in plain business terms? What could go wrong for users, the product, or the company? What would it look like if this became a real problem? No file names, no line numbers, no metrics — only business consequences.]
@@ -455,7 +455,7 @@ Write 2-3 concerns. Each follows this structure:
 
 ## What Should Happen Next
 
-3-4 bullet points. Each is one concrete, plain-English action the team should take. Not "refactor X" — instead: "The team should add automated tests for the payment processing flow before adding new features to it." Specific and actionable without being technical.
+Translate EVERY step in the technical report's "Refactor Plan" section into one plain-English action — do not select a subset or cap the count. Match the technical report's step count and priority order. Each bullet: one concrete action, not "refactor X" but "The team should add automated tests for the payment processing flow before adding new features to it." Carry over the urgency/effort framing (e.g. "this week," "half a day") in plain language where the technical report states it.
 
 ---
 
@@ -470,8 +470,8 @@ Write 2-3 concerns. Each follows this structure:
 Rules:
 - No jargon. No file paths. No function names. No metrics or scores.
 - Every concern and recommendation must trace back to something in the technical report — do not invent.
+- Completeness matters more than brevity: a reader who only sees this summary should learn about every risk and every recommended action from the technical report, just without the technical detail. Do not omit findings to keep this short.
 - Tone: direct, professional, honest. Not alarmist, not reassuring for the sake of it.
-- Readable in under 2 minutes.
 - Every section heading must appear exactly as shown above.`;
 
 const SCOPE_STATEMENT_RE = /\*\*Scope of this analysis:\*\*\s*([^\n]+)/;
