@@ -1,7 +1,17 @@
 // src/parser.ts
 import path from "node:path";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import Parser from "web-tree-sitter";
+
+// Resolved relative to this module's own compiled location (dist/parser.js),
+// not process.cwd() -- archie is frequently invoked from a directory other
+// than its own repo root (e.g. a GitHub Action step that checks out a
+// different target repo and runs `node archie-tool/dist/cli.js ...` from
+// that repo's root). Resolving "grammars" against cwd in that case looks for
+// a grammars/ directory in the TARGET repo instead of archie's own, and
+// fails with a raw ENOENT no matter how correct the rest of the pipeline is.
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 export interface ParsedFunction {
   name: string;
@@ -29,7 +39,7 @@ let pyLanguage: Parser.Language | undefined;
 async function ensureInitialized(): Promise<void> {
   if (initialized) return;
   await Parser.init();
-  const grammarsDir = path.resolve("grammars");
+  const grammarsDir = path.resolve(MODULE_DIR, "..", "grammars");
   tsLanguage = await Parser.Language.load(
     path.join(grammarsDir, "tree-sitter-typescript.wasm")
   );
