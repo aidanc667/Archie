@@ -175,11 +175,13 @@ describe("archie analyze --json output shape", () => {
 
     // Mirrors the `output` construction in the `--json` branch of src/cli.ts.
     const output: ArchieJsonOutput = {
-      version: 1,
+      version: 2,
       repoPath,
       topN,
       report,
+      diff: { requested: false, scoped: false, changedFileCount: null },
       graph: {
+        fileCount: graph.nodes.filter((n) => n.kind === "file").length,
         nodeCount: graph.nodes.length,
         edgeCount: graph.edges.length,
         nodes: graph.nodes,
@@ -188,11 +190,18 @@ describe("archie analyze --json output shape", () => {
     };
 
     const parsed = JSON.parse(JSON.stringify(output));
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     expect(parsed).toHaveProperty("repoPath");
     expect(parsed).toHaveProperty("topN");
     expect(parsed).toHaveProperty("report");
+    expect(parsed).toHaveProperty("diff");
     expect(parsed).toHaveProperty("graph");
+    expect(parsed.graph.fileCount).toBe(graph.nodes.filter((n) => n.kind === "file").length);
+    // Regression guard: fileCount must NOT equal nodeCount here, since the
+    // fixture graph contains function/class nodes in addition to file nodes
+    // -- this is exactly the distinction that was missing when
+    // scripts/post-pr-comment.mjs mislabeled nodeCount as "changed files".
+    expect(parsed.graph.fileCount).toBeLessThan(parsed.graph.nodeCount);
     expect(parsed.graph.nodeCount).toBe(graph.nodes.length);
     expect(parsed.graph.edgeCount).toBe(graph.edges.length);
     expect(Array.isArray(parsed.graph.nodes)).toBe(true);

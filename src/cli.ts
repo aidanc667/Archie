@@ -3,8 +3,9 @@
 import { Command } from "commander";
 import { writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { runPipeline } from "./index.js";
+import { resolveDiffScope } from "./diff.js";
 import type { GraphNode, Edge } from "./types.js";
 
 /**
@@ -15,11 +16,17 @@ import type { GraphNode, Edge } from "./types.js";
  * or changes meaning — see docs/json-output-schema.md.
  */
 export interface ArchieJsonOutput {
-  version: 1;
+  version: 2;
   repoPath: string;
   topN: number;
   report: string;
+  diff: {
+    requested: boolean;
+    scoped: boolean;
+    changedFileCount: number | null;
+  };
   graph: {
+    fileCount: number;
     nodeCount: number;
     edgeCount: number;
     nodes: GraphNode[];
@@ -53,45 +60,24 @@ program
       const { resolve } = await import("node:path");
       const resolvedRepo = resolve(repoPath);
 
-      const getFilterFiles = (): string[] | undefined => {
-        if (!opts.diff) return undefined;
-        try {
-          const output = execSync(`git diff --name-only ${opts.diff} HEAD`, { cwd: resolvedRepo, encoding: "utf8" });
-          const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".py"]);
-          const changed = output
-            .split("\n")
-            .map((f) => f.trim())
-            .filter((f) => f.length > 0)
-            .filter((f) => {
-              const ext = f.slice(f.lastIndexOf("."));
-              return SOURCE_EXTS.has(ext);
-            })
-            .map((f) => resolve(resolvedRepo, f))
-            .filter((f) => existsSync(f));
-          if (changed.length === 0) {
-            console.error(`[diff] no changed source files vs ${opts.diff}, running full analysis`);
-            return undefined;
-          }
-          console.error(`[diff] analyzing ${changed.length} changed files vs ${opts.diff}`);
-          return changed;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          console.error(`[diff] git diff failed: ${message}, running full analysis`);
-          return undefined;
-        }
-      };
-
       const runOnce = async (): Promise<string | undefined> => {
         try {
           if (opts.verbose) console.error(`Analyzing ${repoPath}...`);
-          const filterFiles = getFilterFiles();
+          const diffScope = resolveDiffScope(resolvedRepo, opts.diff);
+          if (diffScope.scoped) {
+            console.error(`[diff] analyzing ${diffScope.changedFileCount} changed files vs ${opts.diff}`);
+          } else if (diffScope.errorMessage) {
+            console.error(`[diff] git diff failed: ${diffScope.errorMessage}, running full analysis`);
+          } else if (diffScope.requested) {
+            console.error(`[diff] no changed source files vs ${opts.diff}, running full analysis`);
+          }
           const result = await runPipeline({
             repoPath,
             topN: Number.parseInt(opts.topN, 10),
             maxTokens: 200000,
             generatePdf: false,
             noCache: opts.noCache,
-            filterFiles,
+            filterFiles: diffScope.files,
           });
           const { report, graph } = result;
 
@@ -120,11 +106,17 @@ program
 
           if (opts.json) {
             const output: ArchieJsonOutput = {
-              version: 1,
+              version: 2,
               repoPath: resolvedRepo,
               topN: Number.parseInt(opts.topN, 10),
               report,
+              diff: {
+                requested: diffScope.requested,
+                scoped: diffScope.scoped,
+                changedFileCount: diffScope.changedFileCount,
+              },
               graph: {
+                fileCount: graph.nodes.filter((n) => n.kind === "file").length,
                 nodeCount: graph.nodes.length,
                 edgeCount: graph.edges.length,
                 nodes: graph.nodes,

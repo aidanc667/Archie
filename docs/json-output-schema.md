@@ -14,11 +14,17 @@ The TypeScript type for this shape is `ArchieJsonOutput`, exported from `src/cli
 
 ```typescript
 interface ArchieJsonOutput {
-  version: 1;
+  version: 2;
   repoPath: string;
   topN: number;
   report: string;
+  diff: {
+    requested: boolean;
+    scoped: boolean;
+    changedFileCount: number | null;
+  };
   graph: {
+    fileCount: number;
     nodeCount: number;
     edgeCount: number;
     nodes: GraphNode[];
@@ -29,14 +35,20 @@ interface ArchieJsonOutput {
 
 | Field | Type | Description |
 |---|---|---|
-| `version` | `1` | Schema version of this JSON output, as a literal number. Currently always `1`. See "Stability" below. |
+| `version` | `2` | Schema version of this JSON output, as a literal number. Currently always `2`. See "Stability" below. |
 | `repoPath` | `string` | Absolute, resolved filesystem path to the repository that was analyzed (the `<path>` argument, resolved via `path.resolve`). |
 | `topN` | `number` | The `--topN` value used for this run (number of top-risk files included in report detail). Parsed from the CLI flag, default `10`. |
 | `report` | `string` | The full architecture report as a markdown string. See "Report field structure" below. |
-| `graph.nodeCount` | `number` | Total count of nodes in the code graph, equal to `graph.nodes.length`. |
+| `diff.requested` | `boolean` | Whether `--diff <ref>` was passed at all. |
+| `diff.scoped` | `boolean` | Whether analysis was actually restricted to a changed-file set. `false` when `--diff` wasn't passed, when `git diff` found no changed *source* files (falls back to full-repo analysis), or when `git diff` itself failed. |
+| `diff.changedFileCount` | `number \| null` | Count of changed source files found by `git diff --name-only <ref> HEAD`, filtered to source extensions. `null` when `--diff` wasn't requested or when `git diff` failed; `0` when it succeeded but found no changed source files. |
+| `graph.fileCount` | `number` | Count of `FileNode`s only (`graph.nodes.filter(n => n.kind === "file").length`). This is the correct number to use for "N files analyzed" — see the warning below. |
+| `graph.nodeCount` | `number` | Total count of *all* nodes in the code graph (files + functions + classes combined), equal to `graph.nodes.length`. **Do not use this as a file count** — see below. |
 | `graph.edgeCount` | `number` | Total count of edges in the code graph, equal to `graph.edges.length`. |
 | `graph.nodes` | `GraphNode[]` | Full array of graph nodes (files, functions, classes). See "GraphNode" below. |
 | `graph.edges` | `Edge[]` | Full array of graph edges (relationships between nodes). See "Edge" below. |
+
+> **Warning — `nodeCount` is not a file count.** `graph.nodes` is a discriminated union of `FileNode`, `FunctionNode`, and `ClassNode`; `nodeCount` sums all three. An earlier version of `scripts/post-pr-comment.mjs` reported `graph.nodeCount` as "changed files" in the PR comment, which produced numbers like "345 changed files" on PRs that touched exactly one file — the real count was every function and class node in the (sometimes full-repo-fallback) graph, not files, and not scoped to the diff. Use `graph.fileCount` for a file count, and `diff.changedFileCount` for the actual diff-scoped count.
 
 ## `GraphNode`
 
@@ -119,11 +131,11 @@ There is currently no structured, per-section JSON representation of the report 
 
 ## Stability
 
-This is schema **version 1**. The `version` field will be incremented whenever a field is added, removed, renamed, or changes meaning in a way that could break an existing consumer. Consumers should:
+This is schema **version 2**. The `version` field will be incremented whenever a field is added, removed, renamed, or changes meaning in a way that could break an existing consumer. Consumers should:
 
 - Check `version` before parsing.
 - Fail loudly (rather than silently guessing) if `version` is not a value they understand — do not assume forward or backward compatibility across versions.
 
 ## Known consumers
 
-- `scripts/post-pr-comment.mjs` — the GitHub Action PR-comment script. Runs `archie analyze . --diff <ref> --json`, parses stdout, and reads `.report` (splitting it into sections by the fixed headings above) and `.graph.nodeCount` / `.graph.edgeCount` to build a PR comment body.
+- `scripts/post-pr-comment.mjs` — the GitHub Action PR-comment script. Runs `archie analyze . --diff <ref> --json`, parses stdout, and reads `.report` (splitting it into sections by the fixed headings above), `.diff.scoped` / `.diff.changedFileCount`, and `.graph.fileCount` / `.graph.edgeCount` to build a PR comment body.

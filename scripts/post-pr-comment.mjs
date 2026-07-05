@@ -31,8 +31,18 @@ function findSection(sections, prefix) {
   return key ? sections[key] : undefined;
 }
 
+function scopeLine(diff, graph) {
+  if (diff.scoped) {
+    return `_Analyzed ${diff.changedFileCount} changed file${diff.changedFileCount === 1 ? "" : "s"} in this diff, ${graph.edgeCount} dependency edges._`;
+  }
+  if (diff.requested) {
+    return `_No changed source files detected in this diff — ran a full-repo analysis instead: ${graph.fileCount} files, ${graph.edgeCount} dependency edges._`;
+  }
+  return `_Analyzed ${graph.fileCount} files, ${graph.edgeCount} dependency edges._`;
+}
+
 function formatCommentBody(data) {
-  const { report, graph } = data;
+  const { report, graph, diff } = data;
   const sections = splitSections(report);
 
   const systemSummary = findSection(sections, "## 1.") ?? "_System summary not available._";
@@ -46,7 +56,7 @@ function formatCommentBody(data) {
   lines.push("");
   lines.push(systemSummary);
   lines.push("");
-  lines.push(`_Analyzed ${graph.nodeCount} changed files, ${graph.edgeCount} dependency edges._`);
+  lines.push(scopeLine(diff, graph));
   lines.push("");
   lines.push("<details>");
   lines.push("<summary>Full architecture review</summary>");
