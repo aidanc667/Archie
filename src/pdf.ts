@@ -168,6 +168,11 @@ export async function convertToPdf(text: string, outPath: string): Promise<void>
         printBackground: true,
         margin: { top: "18mm", right: "20mm", bottom: "22mm", left: "20mm" },
       },
+      // GitHub Actions' Ubuntu runners have no usable Chromium sandbox
+      // (unprivileged user namespaces are restricted), so Puppeteer's
+      // default launch crashes there with "No usable sandbox!". --no-sandbox
+      // is standard for CI environments; only applied under CI, not locally.
+      launch_options: process.env.CI ? { args: ["--no-sandbox"] } : {},
     }
   );
 }
