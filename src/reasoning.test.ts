@@ -7,6 +7,7 @@ import {
   ABSENCE_CLAIM_RULE,
   SCENARIO_GROUNDING_RULE,
   DEPENDENCY_GROUNDING_RULE,
+  EXPORT_GROUNDING_RULE,
 } from "./reasoning.js";
 import type { ContextPack } from "./summarizer.js";
 
@@ -646,6 +647,7 @@ describe("generateReport", () => {
           source: "",
           hasTests: true,
           hasErrorHandling: true,
+          exportedSymbols: [],
         },
         {
           path: "src/b.ts",
@@ -656,6 +658,7 @@ describe("generateReport", () => {
           source: "",
           hasTests: false,
           hasErrorHandling: false,
+          exportedSymbols: [],
         },
         {
           path: "src/c.ts",
@@ -666,6 +669,7 @@ describe("generateReport", () => {
           source: "",
           hasTests: true,
           hasErrorHandling: false,
+          exportedSymbols: [],
         },
       ],
       graphSnapshot: [],
@@ -744,6 +748,7 @@ describe("generateReport", () => {
           source: "",
           hasTests: true,
           hasErrorHandling: true,
+          exportedSymbols: [],
         },
         {
           path: "src/b.ts",
@@ -754,6 +759,7 @@ describe("generateReport", () => {
           source: "",
           hasTests: false,
           hasErrorHandling: false,
+          exportedSymbols: [],
         },
       ],
       graphSnapshot: [],
@@ -832,6 +838,96 @@ describe("DEPENDENCY_GROUNDING_RULE", () => {
     // The dependencies map itself is serialized into pass 1's user message
     // (the Context Pack JSON), so the actual version string reaches the model.
     expect(calls[0][0].messages[0].content).toContain("16.2.2");
+  });
+});
+
+// Regression coverage for a false claim found on a real report: Archie named
+// four private, module-internal helper functions as part of a file's
+// exported API (claiming "13 exported functions") and told a refactor step
+// to modify those private helpers directly -- the real fix boundary was the
+// actual exported function that calls them.
+describe("EXPORT_GROUNDING_RULE", () => {
+  it("forbids counting or naming a symbol as exported unless it appears in exportedSymbols", () => {
+    expect(EXPORT_GROUNDING_RULE).toMatch(/exportedSymbols/);
+    expect(EXPORT_GROUNDING_RULE.toLowerCase()).toMatch(/private, module-internal/);
+  });
+
+  it("is included in the system prompt sent to Claude for both passes", async () => {
+    const remainingText = [
+      "## 1. System Summary\ncontent",
+      "## 3. Production Failure Scenarios\ncontent",
+      "## 4. Refactor Plan (step-by-step)\ncontent",
+      "## 5. Senior Engineer Verdict\ncontent",
+    ].join("\n\n");
+
+    const fakeClient = {
+      messages: {
+        create: vi
+          .fn()
+          .mockResolvedValueOnce(FAKE_RISKS_TOOL_RESPONSE)
+          .mockResolvedValueOnce({
+            content: [{ type: "text", text: remainingText }],
+            usage: { input_tokens: 200, output_tokens: 150 },
+          }),
+      },
+    };
+
+    const pack: ContextPack = {
+      mode: "top-n-detail",
+      systemSummary: { fileCount: 1, totalLoc: 10 },
+      topRiskFiles: [],
+      graphSnapshot: [],
+      clusters: [],
+    };
+
+    await generateReport(fakeClient as any, pack);
+
+    const calls = fakeClient.messages.create.mock.calls;
+    expect(calls[0][0].system).toContain("private, module-internal");
+    expect(calls[1][0].system).toContain("private, module-internal");
+  });
+});
+
+// Regression coverage for a second bug on the same report: a refactor step
+// told Claude Code to build a brand-new TabErrorBoundary class from scratch
+// when a generic, reusable ErrorBoundary already existed elsewhere in the
+// repo and was already used by two other files -- because Archie only sees
+// the top-risk files, not the whole repo, so it can't know a matching
+// component already exists.
+describe("cross-cutting-concern reuse instruction", () => {
+  it("instructs refactor steps to search for an existing implementation before building a new component for a cross-cutting concern", async () => {
+    const remainingText = [
+      "## 1. System Summary\ncontent",
+      "## 3. Production Failure Scenarios\ncontent",
+      "## 4. Refactor Plan (step-by-step)\ncontent",
+      "## 5. Senior Engineer Verdict\ncontent",
+    ].join("\n\n");
+
+    const fakeClient = {
+      messages: {
+        create: vi
+          .fn()
+          .mockResolvedValueOnce(FAKE_RISKS_TOOL_RESPONSE)
+          .mockResolvedValueOnce({
+            content: [{ type: "text", text: remainingText }],
+            usage: { input_tokens: 200, output_tokens: 150 },
+          }),
+      },
+    };
+
+    const pack: ContextPack = {
+      mode: "top-n-detail",
+      systemSummary: { fileCount: 1, totalLoc: 10 },
+      topRiskFiles: [],
+      graphSnapshot: [],
+      clusters: [],
+    };
+
+    await generateReport(fakeClient as any, pack);
+
+    const calls = fakeClient.messages.create.mock.calls;
+    expect(calls[1][0].system.toLowerCase()).toMatch(/error boundary/);
+    expect(calls[1][0].system.toLowerCase()).toMatch(/search the codebase for an existing implementation/);
   });
 });
 

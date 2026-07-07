@@ -58,6 +58,16 @@ identical in file structure, and a guessed version is a fabrication even if it s
 \`dependencies\` is absent, or a specific library isn't listed in it, describe the framework by name only
 with no version number, or note the version could not be verified.`;
 
+export const EXPORT_GROUNDING_RULE = `Grounding rule for a file's exported API surface: each top-risk file's
+\`exportedSymbols\` field lists exactly the functions/classes that file actually exports — this is computed
+from the code, not inferred. Only refer to a function or class as "exported," part of "the public API," or
+usable by other files if its name appears in that file's \`exportedSymbols\`. A function/class that appears
+in the file's source or signature summary but NOT in \`exportedSymbols\` is a private, module-internal
+helper — do not count it toward an "N exported functions" claim, and do not name it as the target of a
+refactor step for a concern that only matters at the module boundary (e.g. adding error handling "at the
+public API"). If a private helper is the true root cause of a risk, say so explicitly and point the fix at
+the actual exported function that calls it, not the private helper in isolation.`;
+
 const SYSTEM_PROMPT = `You are a Staff Engineer writing a formal architecture review for a software engineering team.
 You will be given a Context Pack: a system summary, top-risk files with full source code and metrics
 (complexity, fan-in, LOC, dependency depth, hasTests), a dependency graph snapshot, and optionally
@@ -70,6 +80,7 @@ Grounding rules (follow strictly):
 - Only reason from facts in the Context Pack. Never invent files, functions, or relationships.
 ${ABSENCE_CLAIM_RULE}
 ${DEPENDENCY_GROUNDING_RULE}
+${EXPORT_GROUNDING_RULE}
 - Every risk and finding must cite a specific file, function, or metric from the Context Pack.
   Format citations inline as \`filename.ts\` or \`filename.ts → functionName\`. No bare assertions.
 
@@ -136,7 +147,7 @@ List fixes in priority order (highest impact first). Each step MUST follow this 
 **Effort:** [< 1 hour / half day / 1-2 days / 1 week]
 
 > **Paste into Claude Code to implement this step:**
-> [A complete, self-contained instruction for an AI coding agent. Include: the exact file and function to change, what to change and how, the specific bug or problem being fixed, and a clear acceptance criterion ("this step is done when X"). Write this as a direct imperative. The agent has no other context — everything it needs must be in this block. Minimum 3 sentences.]
+> [A complete, self-contained instruction for an AI coding agent. Include: the exact file and function to change, what to change and how, the specific bug or problem being fixed, and a clear acceptance criterion ("this step is done when X"). Write this as a direct imperative. The agent has no other context — everything it needs must be in this block. Minimum 3 sentences. IMPORTANT: you (the report writer) only see the top-risk files, not the whole repo, so you cannot know whether a reusable component for a cross-cutting concern (an error boundary, a modal, a loading spinner, a toast/notification, etc.) already exists elsewhere. If a step would introduce a new component for one of these concerns, the instruction MUST tell the agent to first search the codebase for an existing implementation with matching behavior and reuse or extend it instead of building a new one, only building new if that search comes up empty — the agent has full repo access and can actually verify this, which you cannot.]
 
 ---
 
