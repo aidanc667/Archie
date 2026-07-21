@@ -14,7 +14,7 @@ The TypeScript type for this shape is `ArchieJsonOutput`, exported from `src/cli
 
 ```typescript
 interface ArchieJsonOutput {
-  version: 4;
+  version: 5;
   repoPath: string;
   topN: number;
   report: string;
@@ -35,12 +35,13 @@ interface ArchieJsonOutput {
     nodes: GraphNode[];
     edges: Edge[];
   };
+  namingConsistency: NamingConsistencyReport;
 }
 ```
 
 | Field | Type | Description |
 |---|---|---|
-| `version` | `4` | Schema version of this JSON output, as a literal number. Currently always `4`. See "Stability" below. |
+| `version` | `5` | Schema version of this JSON output, as a literal number. Currently always `5`. See "Stability" below. |
 | `repoPath` | `string` | Absolute, resolved filesystem path to the repository that was analyzed (the `<path>` argument, resolved via `path.resolve`). |
 | `topN` | `number` | The `--topN` value used for this run (number of top-risk files included in report detail). Parsed from the CLI flag, default `10`. |
 | `report` | `string` | The full architecture report as a markdown string. See "Report field structure" below. |
@@ -58,6 +59,7 @@ interface ArchieJsonOutput {
 | `graph.edgeCount` | `number` | Total count of edges in the code graph, equal to `graph.edges.length`. |
 | `graph.nodes` | `GraphNode[]` | Full array of graph nodes (files, functions, classes). See "GraphNode" below. |
 | `graph.edges` | `Edge[]` | Full array of graph edges (relationships between nodes). See "Edge" below. |
+| `namingConsistency` | `NamingConsistencyReport` | Naming-case consistency findings computed once across the *whole* codebase (not scoped to top-risk files) — e.g. a lone `snake_case` function sitting among an otherwise `camelCase` group of the same (language, kind). See "`NamingConsistencyReport`" below. |
 
 > **Warning — `nodeCount` is not a file count.** `graph.nodes` is a discriminated union of `FileNode`, `FunctionNode`, and `ClassNode`; `nodeCount` sums all three. An earlier version of `scripts/post-pr-comment.mjs` reported `graph.nodeCount` as "changed files" in the PR comment, which produced numbers like "345 changed files" on PRs that touched exactly one file — the real count was every function and class node in the (sometimes full-repo-fallback) graph, not files, and not scoped to the diff. Use `graph.fileCount` for a file count, and `diff.changedFileCount` for the actual diff-scoped count.
 
@@ -222,6 +224,31 @@ interface QualityWarning {
 | `claim` | `string` | The specific offending claim, quoted or closely paraphrased from `report`. |
 | `issue` | `string` | Why the claim is considered ungrounded (e.g. "cites Next.js 15 but dependencies field shows 16.2.2"). |
 
+## `NamingConsistencyReport`
+
+`NamingConsistencyReport` (and the nested `NamingInconsistency`) are defined in and exported from `src/consistency.ts` — treat that file as the authoritative shape if this table and the source ever disagree. This is computed once by `computeNamingConsistency(graph)` across the *whole* analyzed codebase, independent of `--topN` — unlike `risks`/`scenarios`/`qualityWarnings`, it is not scoped to top-risk files.
+
+```typescript
+interface NamingInconsistency {
+  name: string;
+  fileId: string;
+  kind: "function" | "class";
+  language: string;
+  detectedStyle: string;
+  dominantStyle: string;
+}
+
+interface NamingConsistencyReport {
+  inconsistencies: NamingInconsistency[];
+  dominantStyleByGroup: Record<string, string>;
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `inconsistencies` | `NamingInconsistency[]` | Each entry is one function/class name whose naming-case style (`detectedStyle`) doesn't match the dominant style computed for its `(language, kind)` group (`dominantStyle`) — e.g. a lone `snake_case` function name (`detectedStyle`) amid a `camelCase`-dominated (`dominantStyle`) group of TS functions. Empty if no outlier was found, or if no `(language, kind)` group had enough non-ambiguous names to compute a dominant style at all (see `dominantStyleByGroup` below). |
+| `dominantStyleByGroup` | `Record<string, string>` | Maps a `"<language>:<kind>"` group key (e.g. `"ts:function"`, `"python:class"`) to the dominant naming-case style computed for that group. A group is absent from this map entirely if it had fewer than 2 non-ambiguous names to establish a dominant style from — there being no entry for a group is not itself a finding. |
+
 ## `report` field structure
 
 `report` is a single markdown string containing exactly 5 fixed section headings, in order:
@@ -250,13 +277,21 @@ Version 4 is also additive only, and again still a version bump per the stabilit
 - **`history`** — exposes the run-over-run risk trend that was previously only ever printed to CLI stderr (the `[history] Highest-risk file: ...` lines `archie analyze` prints in non-`--json` mode). A consumer like the PR-comment script can now compare `history.current` against `history.previous` itself and show something like "risk trending up/down since last run" without scraping stderr or maintaining its own run history.
 - **`qualityWarnings`** — exposes the findings from the new self-critique pass (Pass 4 in `generateReport`, `src/reasoning.ts`) that checks Sections 1, 4, and 5 of `report` for claims that don't trace back to the Context Pack. Previously this was only visible as an inline "⚠️ Automated grounding check flagged N potential issue(s)" caveat block spliced into `report`'s markdown. A consumer can now read `qualityWarnings` directly to surface an "automated grounding check flagged N issues" caveat in its own UI, without parsing it back out of the report text.
 
+## Version 5 changes
+
+Version 5 is additive only, and again still a version bump per the stability policy below:
+
+- **`namingConsistency`** — exposes whole-codebase naming-case consistency findings (e.g. a lone `snake_case` function amid an otherwise `camelCase`-dominated group of TS functions), computed by the new `computeNamingConsistency` (`src/consistency.ts`) and threaded through `PipelineResult` (`src/index.ts`) into this JSON output. Previously there was no naming-consistency signal anywhere in Archie's pipeline or output — this is new coverage, not a relocation of an existing field. Unlike `risks`/`scenarios`/`qualityWarnings`, it is a whole-codebase signal, not scoped to `--topN` — it is populated the same way regardless of whether the run's Context Pack ended up in `top-n-detail` or `cluster-summary` mode.
+
+This same phase also added a per-top-risk-file test-quality signal (`testCaseCount` / `hasTestAssertions`, computed by the new `computeTestQualitySignal` in `src/testquality.ts`, sourced from each top-risk file's matching test file rather than the file's own source). **This is not part of the JSON schema and has no version-bump implication** — it lives on the internal `TopRiskFile` type (`src/summarizer.ts`), which was never part of `ArchieJsonOutput` to begin with (`ContextPack.topRiskFiles` is pipeline-internal data used to build the prompt sent to the model, not exposed in this JSON output today). If you're looking for `testCaseCount` in `archie analyze --json` output, it isn't there — it only affects what the model sees when writing `report`.
+
 ## Stability
 
-This is schema **version 4**. The `version` field will be incremented whenever a field is added, removed, renamed, or changes meaning in a way that could break an existing consumer. Consumers should:
+This is schema **version 5**. The `version` field will be incremented whenever a field is added, removed, renamed, or changes meaning in a way that could break an existing consumer. Consumers should:
 
 - Check `version` before parsing.
 - Fail loudly (rather than silently guessing) if `version` is not a value they understand — do not assume forward or backward compatibility across versions.
 
 ## Known consumers
 
-- `scripts/post-pr-comment.mjs` — the GitHub Action PR-comment script. Runs `archie analyze . --diff <ref> --json`, parses stdout, and reads `.report` (splitting it into sections by the fixed headings above), `.diff.scoped` / `.diff.changedFileCount`, and `.graph.fileCount` / `.graph.edgeCount` to build a PR comment body. As of schema version 4 it does not yet read `.risks`, `.scenarios`, `.diff.changedFiles`, `.history`, or `.qualityWarnings` — a follow-up task will update it to consume structured `.risks`/`.scenarios` directly (instead of parsing them out of `.report`), to use `.diff.changedFiles` to post inline, per-file review comments, and to surface `.history` / `.qualityWarnings` in the PR comment body.
+- `scripts/post-pr-comment.mjs` — the GitHub Action PR-comment script. Runs `archie analyze . --diff <ref> --json`, parses stdout, and reads `.report` (splitting it into sections by the fixed headings above), `.diff.scoped` / `.diff.changedFileCount`, and `.graph.fileCount` / `.graph.edgeCount` to build a PR comment body. As of schema version 5 it does not yet read `.risks`, `.scenarios`, `.diff.changedFiles`, `.history`, `.qualityWarnings`, or `.namingConsistency` — a follow-up task will update it to consume structured `.risks`/`.scenarios` directly (instead of parsing them out of `.report`), to use `.diff.changedFiles` to post inline, per-file review comments, and to surface `.history` / `.qualityWarnings` / `.namingConsistency` in the PR comment body.

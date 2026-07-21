@@ -10,6 +10,7 @@ import { resolveDiffScope } from "./diff.js";
 import type { GraphNode, Edge } from "./types.js";
 import type { RiskFinding, ScenarioFinding, QualityWarning } from "./reasoning.js";
 import type { HistoryEntry } from "./history.js";
+import type { NamingConsistencyReport } from "./consistency.js";
 
 /**
  * The shape of `archie analyze --json` stdout output. This is a real
@@ -19,7 +20,7 @@ import type { HistoryEntry } from "./history.js";
  * or changes meaning — see docs/json-output-schema.md.
  */
 export interface ArchieJsonOutput {
-  version: 4;
+  version: 5;
   repoPath: string;
   topN: number;
   report: string;
@@ -40,6 +41,11 @@ export interface ArchieJsonOutput {
     nodes: GraphNode[];
     edges: Edge[];
   };
+  // Whole-codebase naming-case consistency signal, computed once per run --
+  // see src/consistency.ts for the authoritative NamingConsistencyReport/
+  // NamingInconsistency shapes. New in schema version 5, see
+  // docs/json-output-schema.md.
+  namingConsistency: NamingConsistencyReport;
 }
 
 const program = new Command();
@@ -132,7 +138,7 @@ program
           if (opts.json) {
             const changedFiles = (diffScope.files ?? []).map((f) => path.relative(resolvedRepo, f));
             const output: ArchieJsonOutput = {
-              version: 4,
+              version: 5,
               repoPath: resolvedRepo,
               topN: Number.parseInt(opts.topN, 10),
               report,
@@ -153,6 +159,7 @@ program
                 nodes: graph.nodes,
                 edges: graph.edges,
               },
+              namingConsistency: result.namingConsistency,
             };
             console.log(JSON.stringify(output, null, 2));
             return report;

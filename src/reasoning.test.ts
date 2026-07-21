@@ -8,6 +8,7 @@ import {
   SCENARIO_GROUNDING_RULE,
   DEPENDENCY_GROUNDING_RULE,
   EXPORT_GROUNDING_RULE,
+  NAMING_CONSISTENCY_RULE,
 } from "./reasoning.js";
 import type { ContextPack } from "./summarizer.js";
 
@@ -158,12 +159,15 @@ function makeFakeClient(overrides: {
   return { messages: { create } };
 }
 
+const EMPTY_NAMING_CONSISTENCY = { inconsistencies: [], dominantStyleByGroup: {} };
+
 const BASE_PACK: ContextPack = {
   mode: "top-n-detail",
   systemSummary: { fileCount: 1, totalLoc: 10 },
   topRiskFiles: [],
   graphSnapshot: [],
   clusters: [],
+  namingConsistency: EMPTY_NAMING_CONSISTENCY,
 };
 
 describe("generateReport", () => {
@@ -700,6 +704,8 @@ describe("generateReport", () => {
           hasTests: true,
           hasErrorHandling: true,
           exportedSymbols: [],
+          testCaseCount: 0,
+          hasTestAssertions: false,
         },
         {
           path: "src/b.ts",
@@ -711,6 +717,8 @@ describe("generateReport", () => {
           hasTests: false,
           hasErrorHandling: false,
           exportedSymbols: [],
+          testCaseCount: 0,
+          hasTestAssertions: false,
         },
         {
           path: "src/c.ts",
@@ -722,10 +730,13 @@ describe("generateReport", () => {
           hasTests: true,
           hasErrorHandling: false,
           exportedSymbols: [],
+          testCaseCount: 0,
+          hasTestAssertions: false,
         },
       ],
       graphSnapshot: [],
       clusters: [],
+      namingConsistency: EMPTY_NAMING_CONSISTENCY,
     };
 
     const { report: result } = await generateReport(fakeClient as any, pack);
@@ -743,6 +754,7 @@ describe("generateReport", () => {
       topRiskFiles: [],
       graphSnapshot: [],
       clusters: [{ fileCount: 500, averageComplexity: 5, maxRiskScore: 0.95 }],
+      namingConsistency: EMPTY_NAMING_CONSISTENCY,
     };
 
     const { report: result } = await generateReport(fakeClient as any, pack);
@@ -767,6 +779,8 @@ describe("generateReport", () => {
           hasTests: true,
           hasErrorHandling: true,
           exportedSymbols: [],
+          testCaseCount: 0,
+          hasTestAssertions: false,
         },
         {
           path: "src/b.ts",
@@ -778,10 +792,13 @@ describe("generateReport", () => {
           hasTests: false,
           hasErrorHandling: false,
           exportedSymbols: [],
+          testCaseCount: 0,
+          hasTestAssertions: false,
         },
       ],
       graphSnapshot: [],
       clusters: [],
+      namingConsistency: EMPTY_NAMING_CONSISTENCY,
     };
 
     const { report: result } = await generateReport(fakeClient as any, pack);
@@ -1072,6 +1089,38 @@ describe("EXPORT_GROUNDING_RULE", () => {
     expect(calls[1][0].system).toContain("private, module-internal");
     expect(calls[2][0].system).toContain("private, module-internal");
     expect(calls[3][0].system).toContain("private, module-internal");
+  });
+});
+
+// Required test #6: the System Summary prompt must not instruct the model to
+// fabricate a naming-consistency compliment when namingConsistency.inconsistencies
+// is empty. SYSTEM_PROMPT is a static string (the actual pack data is only
+// interpolated into the user message at call time), so this is verified by
+// inspecting the rule text itself -- the same direct-string-assertion approach
+// already used for ABSENCE_CLAIM_RULE/DEPENDENCY_GROUNDING_RULE/EXPORT_GROUNDING_RULE
+// above, not a full red-green cycle against a real LLM call.
+describe("NAMING_CONSISTENCY_RULE", () => {
+  it("instructs the model to cite a real example from namingConsistency.inconsistencies when non-empty", () => {
+    expect(NAMING_CONSISTENCY_RULE).toMatch(/namingConsistency/);
+    expect(NAMING_CONSISTENCY_RULE.toLowerCase()).toMatch(/inconsistencies/);
+  });
+
+  it("forbids manufacturing a naming-consistency compliment when the inconsistencies array is empty", () => {
+    expect(NAMING_CONSISTENCY_RULE.toLowerCase()).toMatch(/is empty/);
+    expect(NAMING_CONSISTENCY_RULE.toLowerCase()).toMatch(/fabrication/);
+  });
+
+  it("is included in the system prompt sent to Claude for all four passes", async () => {
+    const fakeClient = makeFakeClient();
+
+    await generateReport(fakeClient as any, BASE_PACK);
+
+    const calls = fakeClient.messages.create.mock.calls;
+    expect(calls).toHaveLength(4);
+    expect(calls[0][0].system).toContain("namingConsistency.inconsistencies");
+    expect(calls[1][0].system).toContain("namingConsistency.inconsistencies");
+    expect(calls[2][0].system).toContain("namingConsistency.inconsistencies");
+    expect(calls[3][0].system).toContain("namingConsistency.inconsistencies");
   });
 });
 

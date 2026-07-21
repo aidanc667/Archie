@@ -8,6 +8,7 @@ import { parseFile, computeComplexity } from "./parser.js";
 import { buildGraph, loadPathAliases, loadGoModuleName, type FileEntry } from "./graph.js";
 import { computeRiskScores } from "./metrics.js";
 import { buildContextPack, loadDependencies } from "./summarizer.js";
+import { computeNamingConsistency, type NamingConsistencyReport } from "./consistency.js";
 import {
   generateReport,
   generateSimplifiedSummary,
@@ -66,6 +67,10 @@ export interface PipelineResult {
   // disclosed, deliberate token-budget tradeoff. Surfacing it here lets the
   // CLI print it unconditionally, not just to someone who reads the report.
   scope: { totalFiles: number; detailedFiles: number; mode: "top-n-detail" | "cluster-summary" };
+  // Whole-codebase naming-case consistency signal (e.g. a stray snake_case
+  // function among mostly camelCase ones), computed once per run directly
+  // from the graph -- independent of which files made the top-N cut.
+  namingConsistency: NamingConsistencyReport;
 }
 
 export async function runPipeline(options: PipelineOptions): Promise<PipelineResult> {
@@ -135,6 +140,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   const dependencies = await loadDependencies(root);
   const goModuleName = await loadGoModuleName(root);
   const graph = buildGraph(parsedByFile, root, aliases, goModuleName);
+  const namingConsistency = computeNamingConsistency(graph);
   const scores = computeRiskScores(graph, complexityByFile);
 
   const restrictToFileIds =
@@ -147,6 +153,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     scores,
     sourceByPath,
     { topN: options.topN, maxTokens: options.maxTokens, restrictToFileIds },
+    namingConsistency,
     dependencies
   );
 
@@ -235,5 +242,6 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
       detailedFiles: pack.topRiskFiles.length,
       mode: pack.mode,
     },
+    namingConsistency,
   };
 }

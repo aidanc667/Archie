@@ -1,11 +1,36 @@
 // src/summarizer.test.ts
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import path from "node:path";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { buildContextPack, loadDependencies } from "./summarizer.js";
+import { computeNamingConsistency } from "./consistency.js";
+import * as testqualityModule from "./testquality.js";
 import type { CodeGraph } from "./types.js";
 import type { RiskScore } from "./metrics.js";
+import type { NamingConsistencyReport } from "./consistency.js";
+
+// Wraps the real computeTestQualitySignal in a spy so tests can assert
+// exactly which (source, language) pair it was called with -- or that it was
+// never called at all for a top-risk file with no matching test file. The
+// real implementation still runs (vi.fn(actual.computeTestQualitySignal)),
+// so these tests exercise real behavior, not a stub.
+vi.mock("./testquality.js", async () => {
+  const actual = await vi.importActual<typeof import("./testquality.js")>("./testquality.js");
+  return {
+    ...actual,
+    computeTestQualitySignal: vi.fn(actual.computeTestQualitySignal),
+  };
+});
+
+const EMPTY_NAMING_CONSISTENCY: NamingConsistencyReport = {
+  inconsistencies: [],
+  dominantStyleByGroup: {},
+};
+
+beforeEach(() => {
+  vi.mocked(testqualityModule.computeTestQualitySignal).mockClear();
+});
 
 function makeGraph(): CodeGraph {
   return {
@@ -48,7 +73,7 @@ function makeThreeFileScores(): RiskScore[] {
 
 describe("buildContextPack", () => {
   it("includes top-N risk files with full metrics and a graph snapshot", () => {
-    const pack = buildContextPack(makeGraph(), makeScores(), new Map(), { topN: 1, maxTokens: 50000 });
+    const pack = buildContextPack(makeGraph(), makeScores(), new Map(), { topN: 1, maxTokens: 50000 }, EMPTY_NAMING_CONSISTENCY);
 
     expect(pack.topRiskFiles).toHaveLength(1);
     expect(pack.topRiskFiles[0].path).toBe("a.ts");
@@ -60,11 +85,17 @@ describe("buildContextPack", () => {
   // *eligibility* for the top-N slot, not the scores or graph themselves --
   // a restricted, lower-risk file must still carry its real, full-graph fanIn.
   it("restrictToFileIds limits which files are eligible for top-N, without changing their scores", () => {
-    const pack = buildContextPack(makeGraph(), makeScores(), new Map(), {
-      topN: 1,
-      maxTokens: 50000,
-      restrictToFileIds: new Set(["file:b.ts"]),
-    });
+    const pack = buildContextPack(
+      makeGraph(),
+      makeScores(),
+      new Map(),
+      {
+        topN: 1,
+        maxTokens: 50000,
+        restrictToFileIds: new Set(["file:b.ts"]),
+      },
+      EMPTY_NAMING_CONSISTENCY
+    );
 
     // a.ts has the higher risk score (0.9 vs 0.1) and would normally win the
     // single topN slot -- but it's excluded from the restriction set, so
@@ -77,17 +108,20 @@ describe("buildContextPack", () => {
   });
 
   it("falls back to cluster-summary mode when detail set exceeds token budget", () => {
-    const pack = buildContextPack(makeGraph(), makeScores(), new Map(), { topN: 1, maxTokens: 1 });
+    const pack = buildContextPack(makeGraph(), makeScores(), new Map(), { topN: 1, maxTokens: 1 }, EMPTY_NAMING_CONSISTENCY);
 
     expect(pack.mode).toBe("cluster-summary");
     expect(pack.topRiskFiles).toEqual([]);
   });
 
   it("incrementally prunes the lowest-risk file when budget fits 2 of 3 but not all 3", () => {
-    const pack = buildContextPack(makeThreeFileGraph(), makeThreeFileScores(), new Map(), {
-      topN: 3,
-      maxTokens: 140,
-    });
+    const pack = buildContextPack(
+      makeThreeFileGraph(),
+      makeThreeFileScores(),
+      new Map(),
+      { topN: 3, maxTokens: 170 },
+      EMPTY_NAMING_CONSISTENCY
+    );
 
     expect(pack.mode).toBe("top-n-detail");
     expect(pack.topRiskFiles).toHaveLength(2);
@@ -100,10 +134,13 @@ describe("buildContextPack", () => {
       ["file:b.ts", "export function b() { return 2; }"],
     ]);
 
-    const pack = buildContextPack(makeGraph(), makeScores(), sourceByPath, {
-      topN: 1,
-      maxTokens: 50000,
-    });
+    const pack = buildContextPack(
+      makeGraph(),
+      makeScores(),
+      sourceByPath,
+      { topN: 1, maxTokens: 50000 },
+      EMPTY_NAMING_CONSISTENCY
+    );
 
     expect(pack.topRiskFiles).toHaveLength(1);
     expect(pack.topRiskFiles[0].path).toBe("a.ts");
@@ -113,10 +150,13 @@ describe("buildContextPack", () => {
   it("falls back to an empty string when a top-risk file's source is missing from the map", () => {
     const sourceByPath = new Map<string, string>(); // empty — no entries
 
-    const pack = buildContextPack(makeGraph(), makeScores(), sourceByPath, {
-      topN: 1,
-      maxTokens: 50000,
-    });
+    const pack = buildContextPack(
+      makeGraph(),
+      makeScores(),
+      sourceByPath,
+      { topN: 1, maxTokens: 50000 },
+      EMPTY_NAMING_CONSISTENCY
+    );
 
     expect(pack.topRiskFiles).toHaveLength(1);
     expect(pack.topRiskFiles[0].source).toBe("");
@@ -138,7 +178,13 @@ describe("buildContextPack", () => {
       { fileId: "file:b.ts", riskScore: 0.5, complexity: 5, fanIn: 1, loc: 10, dependencyDepth: 0 },
     ];
 
-    const pack = buildContextPack(graph, scores, new Map(), { topN: 2, maxTokens: 50000 });
+    const pack = buildContextPack(
+      graph,
+      scores,
+      new Map(),
+      { topN: 2, maxTokens: 50000 },
+      EMPTY_NAMING_CONSISTENCY
+    );
 
     const fileA = pack.topRiskFiles.find((f) => f.path === "a.ts");
     const fileB = pack.topRiskFiles.find((f) => f.path === "b.ts");
@@ -152,10 +198,13 @@ describe("buildContextPack", () => {
       ["file:b.ts", "function b() { return 2; }"],
     ]);
 
-    const pack = buildContextPack(makeGraph(), makeScores(), sourceByPath, {
-      topN: 2,
-      maxTokens: 50000,
-    });
+    const pack = buildContextPack(
+      makeGraph(),
+      makeScores(),
+      sourceByPath,
+      { topN: 2, maxTokens: 50000 },
+      EMPTY_NAMING_CONSISTENCY
+    );
 
     const fileA = pack.topRiskFiles.find((f) => f.path === "a.ts");
     const fileB = pack.topRiskFiles.find((f) => f.path === "b.ts");
@@ -188,7 +237,13 @@ describe("buildContextPack", () => {
       { fileId: "file:a.ts", riskScore: 0.9, complexity: 5, fanIn: 0, loc: 50, dependencyDepth: 0 },
     ];
 
-    const pack = buildContextPack(graph, scores, new Map(), { topN: 1, maxTokens: 50000 });
+    const pack = buildContextPack(
+      graph,
+      scores,
+      new Map(),
+      { topN: 1, maxTokens: 50000 },
+      EMPTY_NAMING_CONSISTENCY
+    );
 
     expect(pack.topRiskFiles[0].exportedSymbols.sort()).toEqual(["PublicClass", "publicFn"]);
   });
@@ -218,7 +273,13 @@ describe("buildContextPack", () => {
     const fullGraph: CodeGraph = { nodes: [...fillerNodes, ...graph.nodes], edges: graph.edges };
     const scores: RiskScore[] = [...fillerScores, { fileId: "file:d.ts", riskScore: 0.5, complexity: 5, fanIn: 0, loc: 50, dependencyDepth: 0 }];
 
-    const pack = buildContextPack(fullGraph, scores, new Map(), { topN: 5, maxTokens: 50000 });
+    const pack = buildContextPack(
+      fullGraph,
+      scores,
+      new Map(),
+      { topN: 5, maxTokens: 50000 },
+      EMPTY_NAMING_CONSISTENCY
+    );
 
     const fileD = pack.topRiskFiles.find((f) => f.path === "d.ts");
     expect(fileD?.source).toContain("publicFn");
@@ -237,6 +298,7 @@ describe("buildContextPack", () => {
       makeScores(),
       new Map(),
       { topN: 1, maxTokens: 50000 },
+      EMPTY_NAMING_CONSISTENCY,
       { next: "16.2.2", react: "19.0.0" }
     );
 
@@ -244,7 +306,13 @@ describe("buildContextPack", () => {
   });
 
   it("leaves dependencies undefined when none is provided", () => {
-    const pack = buildContextPack(makeGraph(), makeScores(), new Map(), { topN: 1, maxTokens: 50000 });
+    const pack = buildContextPack(
+      makeGraph(),
+      makeScores(),
+      new Map(),
+      { topN: 1, maxTokens: 50000 },
+      EMPTY_NAMING_CONSISTENCY
+    );
 
     expect(pack.dependencies).toBeUndefined();
   });
@@ -255,11 +323,117 @@ describe("buildContextPack", () => {
       makeScores(),
       new Map(),
       { topN: 1, maxTokens: 1 },
+      EMPTY_NAMING_CONSISTENCY,
       { next: "16.2.2" }
     );
 
     expect(pack.mode).toBe("cluster-summary");
     expect(pack.dependencies).toEqual({ next: "16.2.2" });
+  });
+
+  // Required test #1: buildContextPack's result includes a namingConsistency
+  // field populated from computeNamingConsistency(graph)'s actual return
+  // value -- this is a whole-codebase signal, so it must appear in both
+  // top-n-detail mode and the cluster-summary fallback, not just the former.
+  it("populates namingConsistency from computeNamingConsistency(graph) in top-n-detail mode", () => {
+    const graph: CodeGraph = {
+      nodes: [
+        { kind: "file", id: "file:a.ts", path: "a.ts", loc: 10 },
+        { kind: "function", id: "fn:1", name: "doWork", fileId: "file:a.ts", startLine: 1, endLine: 2 },
+        { kind: "function", id: "fn:2", name: "fetchData", fileId: "file:a.ts", startLine: 3, endLine: 4 },
+        { kind: "function", id: "fn:3", name: "my_function", fileId: "file:a.ts", startLine: 5, endLine: 6 },
+      ],
+      edges: [],
+    };
+    const scores: RiskScore[] = [
+      { fileId: "file:a.ts", riskScore: 0.9, complexity: 5, fanIn: 0, loc: 10, dependencyDepth: 0 },
+    ];
+    const expected = computeNamingConsistency(graph);
+    expect(expected.inconsistencies.length).toBeGreaterThan(0); // sanity: this fixture actually has one
+
+    const pack = buildContextPack(graph, scores, new Map(), { topN: 1, maxTokens: 50000 }, expected);
+
+    expect(pack.mode).toBe("top-n-detail");
+    expect(pack.namingConsistency).toEqual(expected);
+  });
+
+  it("populates namingConsistency in the cluster-summary fallback too", () => {
+    const graph = makeGraph();
+    const expected = computeNamingConsistency(graph);
+
+    const pack = buildContextPack(graph, makeScores(), new Map(), { topN: 1, maxTokens: 1 }, expected);
+
+    expect(pack.mode).toBe("cluster-summary");
+    expect(pack.namingConsistency).toEqual(expected);
+  });
+
+  // Required test #2: a top-risk file with a matching test file gets its
+  // testCaseCount/hasTestAssertions computed from the TEST file's source (not
+  // the source file's own source), via the language detected from the test
+  // file's path.
+  it("computes testCaseCount/hasTestAssertions from the matching test file's source and detected language", () => {
+    const graph: CodeGraph = {
+      nodes: [
+        { kind: "file", id: "file:a.ts", path: "a.ts", loc: 10 },
+        { kind: "file", id: "file:a.test.ts", path: "a.test.ts", loc: 20 },
+      ],
+      edges: [{ type: "TESTED_BY", from: "file:a.ts", to: "file:a.test.ts", confidence: 1.0 }],
+    };
+    const scores: RiskScore[] = [
+      { fileId: "file:a.ts", riskScore: 0.9, complexity: 5, fanIn: 0, loc: 10, dependencyDepth: 0 },
+    ];
+    const sourceByPath = new Map<string, string>([
+      ["file:a.ts", "export function a() { return 1; } // no it()/test() calls in here"],
+      [
+        "file:a.test.ts",
+        `
+        import { it, expect } from "vitest";
+        it("does a thing", () => { expect(1).toBe(1); });
+        it("does another thing", () => { expect(2).toBe(2); });
+        `,
+      ],
+    ]);
+
+    const pack = buildContextPack(
+      graph,
+      scores,
+      sourceByPath,
+      { topN: 1, maxTokens: 50000 },
+      EMPTY_NAMING_CONSISTENCY
+    );
+
+    expect(pack.topRiskFiles[0].testCaseCount).toBe(2);
+    expect(pack.topRiskFiles[0].hasTestAssertions).toBe(true);
+    expect(vi.mocked(testqualityModule.computeTestQualitySignal)).toHaveBeenCalledWith(
+      sourceByPath.get("file:a.test.ts"),
+      "ts"
+    );
+    // Never called with the source file's own source -- that would be
+    // meaningless (it's not a test file).
+    expect(vi.mocked(testqualityModule.computeTestQualitySignal)).not.toHaveBeenCalledWith(
+      sourceByPath.get("file:a.ts"),
+      expect.anything()
+    );
+  });
+
+  // Required test #3: a top-risk file with NO matching test file defaults to
+  // the zero-signal values, and computeTestQualitySignal is never invoked for
+  // it at all (there's nothing meaningful to compute a signal from).
+  it("defaults to zero testCaseCount/hasTestAssertions and never calls computeTestQualitySignal when there is no matching test file", () => {
+    const pack = buildContextPack(
+      makeGraph(),
+      makeScores(),
+      new Map(),
+      { topN: 2, maxTokens: 50000 },
+      EMPTY_NAMING_CONSISTENCY
+    );
+
+    expect(pack.topRiskFiles).toHaveLength(2);
+    for (const file of pack.topRiskFiles) {
+      expect(file.testCaseCount).toBe(0);
+      expect(file.hasTestAssertions).toBe(false);
+    }
+    expect(testqualityModule.computeTestQualitySignal).not.toHaveBeenCalled();
   });
 });
 

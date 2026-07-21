@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { CodeGraph } from "./types.js";
 import type { RiskScore } from "./metrics.js";
+import { detectFileLanguage } from "./consistency.js";
+import type { NamingConsistencyReport } from "./consistency.js";
+import { computeTestQualitySignal } from "./testquality.js";
 
 export interface ContextPackOptions {
   topN: number;
@@ -60,6 +63,12 @@ export interface TopRiskFile {
   // module-internal helper functions as "exported" and aimed a refactor
   // step directly at them instead of their real (exported) call site.
   exportedSymbols: string[];
+  // Test-quality signals for the file's matching test file (via TESTED_BY),
+  // not this file's own source -- going beyond hasTests' binary "some test
+  // exists" check to say something about how substantial that test file
+  // actually is. Zero/false when there is no matching test file at all.
+  testCaseCount: number;
+  hasTestAssertions: boolean;
 }
 
 export interface ClusterSummary {
@@ -75,6 +84,10 @@ export interface ContextPack {
   graphSnapshot: { from: string; to: string; type: string }[];
   clusters: ClusterSummary[];
   dependencies?: Record<string, string>;
+  // A whole-codebase signal (not scoped to top-N), so it belongs in both
+  // top-n-detail and cluster-summary modes -- unlike topRiskFiles, which is
+  // empty in cluster-summary mode.
+  namingConsistency: NamingConsistencyReport;
 }
 
 // Rough token estimate: ~4 characters per token. This measures the length of the
@@ -98,6 +111,19 @@ function testedFileIds(graph: CodeGraph): Set<string> {
     if (edge.type === "TESTED_BY") set.add(edge.from);
   }
   return set;
+}
+
+// Maps each tested source file's id to its test file's id (TESTED_BY edges:
+// edge.from is the source file, edge.to is the test file). testedFileIds
+// above only answers "does a test file exist"; this answers "which one",
+// so a top-risk file's test-quality signal can be computed from the actual
+// test file's source instead of the source file's own source.
+function testFileIdByFile(graph: CodeGraph): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const edge of graph.edges) {
+    if (edge.type === "TESTED_BY") map.set(edge.from, edge.to);
+  }
+  return map;
 }
 
 function hasErrorHandling(source: string): boolean {
@@ -161,12 +187,14 @@ export function buildContextPack(
   scores: RiskScore[],
   sourceByPath: Map<string, string>,
   options: ContextPackOptions,
+  namingConsistency: NamingConsistencyReport,
   dependencies?: Record<string, string>
 ): ContextPack {
   const paths = pathByFileId(graph);
   const systemSummary = buildSystemSummary(graph);
   const tested = testedFileIds(graph);
   const exported = exportedNodeIds(graph);
+  const testFileIds = testFileIdByFile(graph);
 
   const eligible = options.restrictToFileIds
     ? scores.filter((s) => options.restrictToFileIds!.has(s.fileId))
@@ -176,26 +204,49 @@ export function buildContextPack(
 
   // Mode 1: top-N detail, pruning lowest-risk entries until it fits.
   while (topN.length > 0) {
-    const topRiskFiles: TopRiskFile[] = topN.map((s, index) => ({
-      path: paths.get(s.fileId) ?? s.fileId,
-      riskScore: s.riskScore,
-      complexity: s.complexity,
-      fanIn: s.fanIn,
-      loc: s.loc,
-      source: index < 3
-        ? (sourceByPath.get(s.fileId) ?? "")
-        : buildSignatureSummary(graph, s.fileId, exported),
-      hasTests: tested.has(s.fileId),
-      hasErrorHandling: hasErrorHandling(sourceByPath.get(s.fileId) ?? ""),
-      exportedSymbols: exportedSymbolsForFile(graph, s.fileId, exported),
-    }));
+    const topRiskFiles: TopRiskFile[] = topN.map((s, index) => {
+      const testFileId = testFileIds.get(s.fileId);
+      // A missing test file is a normal, expected case (most files don't
+      // have one) -- default to the zero-signal values rather than calling
+      // computeTestQualitySignal on the source file's own source, which
+      // would be meaningless (it isn't a test file).
+      const testQuality = testFileId
+        ? computeTestQualitySignal(
+            sourceByPath.get(testFileId) ?? "",
+            detectFileLanguage(paths.get(testFileId) ?? "") ?? ""
+          )
+        : { testCaseCount: 0, hasTestAssertions: false };
+
+      return {
+        path: paths.get(s.fileId) ?? s.fileId,
+        riskScore: s.riskScore,
+        complexity: s.complexity,
+        fanIn: s.fanIn,
+        loc: s.loc,
+        source: index < 3
+          ? (sourceByPath.get(s.fileId) ?? "")
+          : buildSignatureSummary(graph, s.fileId, exported),
+        hasTests: tested.has(s.fileId),
+        hasErrorHandling: hasErrorHandling(sourceByPath.get(s.fileId) ?? ""),
+        exportedSymbols: exportedSymbolsForFile(graph, s.fileId, exported),
+        testCaseCount: testQuality.testCaseCount,
+        hasTestAssertions: testQuality.hasTestAssertions,
+      };
+    });
 
     const includedIds = new Set(topN.map((s) => s.fileId));
     const graphSnapshot = graph.edges
       .filter((e) => includedIds.has(e.from) || includedIds.has(e.to))
       .map((e) => ({ from: paths.get(e.from) ?? e.from, to: paths.get(e.to) ?? e.to, type: e.type }));
 
-    const candidate = { systemSummary, topRiskFiles, graphSnapshot, clusters: [], dependencies };
+    const candidate = {
+      systemSummary,
+      topRiskFiles,
+      graphSnapshot,
+      clusters: [],
+      dependencies,
+      namingConsistency,
+    };
 
     if (estimateTokens(candidate) <= options.maxTokens) {
       return { mode: "top-n-detail", ...candidate };
@@ -212,5 +263,6 @@ export function buildContextPack(
     graphSnapshot: [],
     clusters: buildClusterSummary(scores),
     dependencies,
+    namingConsistency,
   };
 }

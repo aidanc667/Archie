@@ -195,6 +195,23 @@ describe("runPipeline with generatePdf", () => {
     expect(result.qualityWarnings).toEqual([]);
   });
 
+  // Required test #5: PipelineResult.namingConsistency must be populated by
+  // runPipeline -- a whole-codebase signal computed once from the graph, not
+  // dependent on generatePdf or any other option.
+  it("populates result.namingConsistency with a well-formed report", async () => {
+    const repoPath = path.resolve("fixtures/parser-basic");
+    const result = await runPipeline({
+      repoPath,
+      topN: 5,
+      maxTokens: 50000,
+      generatePdf: false,
+    });
+
+    expect(result.namingConsistency).toBeDefined();
+    expect(Array.isArray(result.namingConsistency.inconsistencies)).toBe(true);
+    expect(typeof result.namingConsistency.dominantStyleByGroup).toBe("object");
+  });
+
   it("leaves simplifiedSummary undefined when generatePdf is false", async () => {
     const repoPath = path.resolve("fixtures/parser-basic");
     const result = await runPipeline({

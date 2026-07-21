@@ -68,6 +68,19 @@ refactor step for a concern that only matters at the module boundary (e.g. addin
 public API"). If a private helper is the true root cause of a risk, say so explicitly and point the fix at
 the actual exported function that calls it, not the private helper in isolation.`;
 
+export const NAMING_CONSISTENCY_RULE = `Grounding rule for naming consistency: the Context Pack's
+\`namingConsistency.inconsistencies\` array lists specific naming-case outliers actually detected across the
+whole codebase (e.g. a snake_case function sitting among an otherwise camelCase (language, kind) group). If
+this array is non-empty, the System Summary's one-sentence architectural-style remark should mention it,
+citing a real example from the array — the outlier's \`name\`, its \`detectedStyle\`, and the group's
+\`dominantStyle\` — not a vague, generic statement about "some naming inconsistencies." If
+\`namingConsistency.inconsistencies\` is empty, say nothing about naming consistency at all: do not
+compliment the codebase for being "consistently named" or similar. An empty array only means no outlier was
+found among the (language, kind) groups that met the minimum sample size to have a dominant style computed
+in the first place — it is not an affirmative, deliberate check that every name in the codebase is
+consistent. A compliment about consistency that was never actually verified is a fabrication, not a
+finding.`;
+
 const SYSTEM_PROMPT = `You are a Staff Engineer writing a formal architecture review for a software engineering team.
 You will be given a Context Pack: a system summary, top-risk files with full source code and metrics
 (complexity, fan-in, LOC, dependency depth, hasTests), a dependency graph snapshot, and optionally
@@ -81,6 +94,7 @@ Grounding rules (follow strictly):
 ${ABSENCE_CLAIM_RULE}
 ${DEPENDENCY_GROUNDING_RULE}
 ${EXPORT_GROUNDING_RULE}
+${NAMING_CONSISTENCY_RULE}
 - Every risk and finding must cite a specific file, function, or metric from the Context Pack.
   Format citations inline as \`filename.ts\` or \`filename.ts → functionName\`. No bare assertions.
 
@@ -96,7 +110,7 @@ Write 3-5 sentences covering:
   number must come from the Context Pack's \`dependencies\` field (see grounding rule above) — never
   inferred or guessed
 - Scale indicators: total files, LOC, rough complexity level (simple / moderate / complex)
-- One sentence on overall architectural style (e.g. "monolithic with a clean pipeline pattern" or "loosely coupled modules with a central orchestrator")
+- One sentence on overall architectural style (e.g. "monolithic with a clean pipeline pattern" or "loosely coupled modules with a central orchestrator"). If the Context Pack's \`namingConsistency.inconsistencies\` array is non-empty, also mention this here, citing a real example from that array (see grounding rule above). If the array is empty, say nothing about naming consistency at all.
 
 Then a **Key Metrics** block:
 
@@ -696,6 +710,7 @@ ${ABSENCE_CLAIM_RULE}
 ${DEPENDENCY_GROUNDING_RULE}
 ${EXPORT_GROUNDING_RULE}
 ${SCENARIO_GROUNDING_RULE}
+${NAMING_CONSISTENCY_RULE}
 
 Concretely, check for:
 (a) A version number that doesn't match the Context Pack's \`dependencies\` field.
@@ -704,6 +719,9 @@ Concretely, check for:
 (c) An absence claim ("no tests", "no error handling", "lacks X") that isn't backed by \`hasTests\`
     or \`hasErrorHandling\` being explicitly false for that file.
 (d) A named file, function, or metric that does not actually appear anywhere in the Context Pack.
+(e) A naming-consistency claim (either citing an inconsistency, or complimenting consistency) that
+    isn't backed by a real entry in \`namingConsistency.inconsistencies\` — including a compliment
+    about consistent naming when that array is empty.
 
 Only flag claims you can concretely trace back to a mismatch or absence in the Context Pack — do not
 flag stylistic issues, subjective judgment calls, or claims you merely find surprising. If you find
