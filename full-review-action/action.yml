@@ -1,0 +1,71 @@
+name: 'Archie Full Repository Review'
+description: 'AI-powered full-repository architecture and risk analysis, grounded in a parsed dependency graph and powered by Claude, posted to a persistent GitHub Issue'
+author: 'aidanc667'
+branding:
+  icon: 'search'
+  color: 'green'
+
+inputs:
+  anthropic-api-key:
+    description: 'Anthropic API key used to run the analysis'
+    required: true
+  github-token:
+    description: 'Token used to post the issue comment'
+    required: false
+    default: ${{ github.token }}
+  top-n:
+    description: 'Number of top-risk files to review in detail'
+    required: false
+    default: '10'
+  archie-ref:
+    description: 'Git ref (tag/branch/sha) of the Archie tool to check out — pin this to a release for reproducible CI runs instead of always building the latest default branch'
+    required: false
+    default: 'main'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout Archie
+      uses: actions/checkout@v4
+      with:
+        repository: aidanc667/archie
+        ref: ${{ inputs.archie-ref }}
+        path: archie-tool
+
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Cache Archie tool dependencies
+      uses: actions/cache@v4
+      with:
+        path: archie-tool/node_modules
+        key: ${{ runner.os }}-archie-npm-${{ hashFiles('archie-tool/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-archie-npm-
+
+    - name: Install Archie dependencies
+      shell: bash
+      working-directory: archie-tool
+      env:
+        PUPPETEER_SKIP_DOWNLOAD: 'true'
+      run: npm ci
+
+    - name: Build Archie
+      shell: bash
+      working-directory: archie-tool
+      run: npm run build
+
+    - name: Run Archie analysis
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+      run: node archie-tool/dist/cli.js analyze . --topN ${{ inputs.top-n }} --json > archie-output.json
+
+    - name: Post full review issue
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+      run: node archie-tool/scripts/post-full-review-issue.mjs archie-output.json

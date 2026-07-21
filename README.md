@@ -152,6 +152,87 @@ from the root one (see [`fix-action/action.yml`](fix-action/action.yml)) — it
 checks out the PR's actual head branch, builds Archie, installs the Claude
 Code CLI, runs `archie fix --yes`, and opens the resulting PR itself.
 
+## Running a full-repo review on demand (Archie Full Review)
+
+Beyond PR review, Archie can also run a full, non-diff-scoped analysis of
+the entire repository — not just the files changed in a PR — and post the
+result to a single, persistent GitHub Issue labeled `archie-report`,
+updating that same issue on every subsequent run instead of opening a new
+one each time.
+
+### How to trigger it
+
+This is a manual, on-demand trigger only — there's no PR or issue comment
+involved:
+
+1. Go to the repo's **Actions** tab.
+2. Select **Archie Full Review** from the list of workflows.
+3. Click **Run workflow** (optionally set the `top-n` input to control how
+   many top-risk files are reviewed in detail).
+
+You can also trigger it from the command line with the GitHub CLI:
+
+```bash
+gh workflow run "Archie Full Review"
+```
+
+Note: the **Run workflow** button only appears once the workflow file
+exists on the repo's **default branch** — pushing it on a feature branch or
+opening a PR with it isn't enough for the button to show up.
+
+### Setup for your own repo
+
+1. Add a workflow file at `.github/workflows/archie-full-review.yml`:
+
+   ```yaml
+   name: Archie Full Review
+
+   on:
+     workflow_dispatch:
+       inputs:
+         top-n:
+           description: "Number of top-risk files to review in detail"
+           required: false
+           default: '10'
+           type: string
+
+   permissions:
+     contents: read
+     issues: write
+
+   jobs:
+     full-review:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v4
+
+         - uses: aidanc667/archie/full-review-action@main
+           with:
+             anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+             top-n: ${{ inputs.top-n }}
+   ```
+
+2. Add the same `ANTHROPIC_API_KEY` repo secret used for PR review (Settings
+   → Secrets and variables → Actions).
+
+`aidanc667/archie/full-review-action@main` is a composite Action, separate
+from the root one (see
+[`full-review-action/action.yml`](full-review-action/action.yml)) — it
+checks out the repo, builds Archie, runs a full (non-`--diff`) analysis,
+and creates or updates the `archie-report` issue itself. A local
+`uses: ./full-review-action` path only resolves inside the Archie repo
+itself; external consumers should reference the published `@main` action
+shown above instead (or pin to a specific ref for reproducible runs).
+
+### Pinning the report issue (optional)
+
+If you want the `archie-report` issue to stay visible at the top of your
+repo's issue list, you can pin it manually from the GitHub UI after the
+first run creates it (issue page → **Pin issue**). This is a one-time
+manual step, not something Archie automates — GitHub's REST API has no
+endpoint for pinning an entire issue; pinning is only available through
+GitHub's GraphQL API, which is out of scope here.
+
 ## Testing
 
 `npm test` runs 129 tests across 14 files (Vitest), covering the parser, graph construction, risk scoring, the fix pipeline, and CLI integration.

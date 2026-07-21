@@ -1,0 +1,47 @@
+# Lets a maintainer manually kick off a full-repo Archie review from the
+# Actions tab. Requires the ANTHROPIC_API_KEY repo secret to be set (Settings
+# -> Secrets and variables -> Actions -> New repository secret).
+#
+# This is a manual, on-demand trigger only — there's no PR or issue comment
+# involved. To run it: go to the Actions tab, select "Archie Full Review",
+# click "Run workflow".
+#
+# Unlike archie-pr-review.yml (which runs `--diff` against a PR and posts a
+# PR comment), this workflow analyzes the whole repository and posts the
+# result to a single, persistent GitHub Issue labeled `archie-report` —
+# creating it on the first run and updating it on every run after that.
+#
+# This file uses `uses: ./full-review-action`, which only resolves because
+# this workflow lives inside the Archie repo itself. External consumers of
+# Archie should reference the published action instead:
+#   uses: aidanc667/archie/full-review-action@main
+# (see the README for the full external setup, including pinning to a
+# specific ref instead of `main` for reproducible runs.)
+
+name: Archie Full Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      top-n:
+        description: "Number of top-risk files to review in detail"
+        required: false
+        default: '10'
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  full-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Archie full review
+        uses: ./full-review-action
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          top-n: ${{ inputs.top-n }}
