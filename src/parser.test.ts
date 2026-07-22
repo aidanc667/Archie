@@ -358,6 +358,32 @@ describe("dangerous sink detection", () => {
     expect(result.dangerousSinks.some((s) => s.sink === "execFileSync")).toBe(false);
   });
 
+  // Confirmed real false positive, found by an independent review running
+  // this detector against Archie's own source: matching "exec" by callee
+  // NAME alone (the pre-existing "don't resolve imports" heuristic) also
+  // matched RegExp.prototype.exec() -- a completely unrelated, extremely
+  // common method that happens to share the name "exec" with
+  // child_process's exec/execSync. graph.ts's own
+  // `/^module\s+(\S+)/m.exec(raw)` and `PY_TEST_PREFIX_RE.exec(basename)`
+  // are exactly this shape. Fixed by requiring exec/execSync to be called as
+  // a BARE identifier, never as `<receiver>.exec(...)`.
+  it("does not flag a member-expression `.exec(...)` call on a non-child_process receiver (e.g. RegExp.exec)", async () => {
+    const filePath = path.resolve("fixtures/security/sinks.ts");
+    const result = await parseFile(filePath);
+    // Line 33 is findModuleName's `/.../.exec(raw)` call (see the fixture) --
+    // RegExp.prototype.exec(), which must never produce a finding just
+    // because it shares the method name "exec" with child_process's real
+    // shell-execution sink. (The file's other, legitimate execSync findings
+    // on lines 17/21 are covered by earlier tests and must stay unaffected.)
+    expect(result.dangerousSinks.some((s) => s.line === 33)).toBe(false);
+  });
+
+  it("does not flag any exec-named member call anywhere in Archie's own real src/graph.ts", async () => {
+    const filePath = path.resolve("src/graph.ts");
+    const result = await parseFile(filePath);
+    expect(result.dangerousSinks.some((s) => s.sink === "exec" || s.sink === "execSync")).toBe(false);
+  });
+
   it("does not flag the word `eval(` appearing only inside a comment", async () => {
     const filePath = path.resolve("fixtures/security/sinks.ts");
     const result = await parseFile(filePath);

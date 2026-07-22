@@ -31,7 +31,13 @@ import type { MagicNumberOccurrence } from "./parser.js";
 export interface SecurityFinding {
   file: string;
   line: number;
-  ruleId: string; // secrets: "aws-access-key" etc; dangerousSinks: the sink name, e.g. "eval", "execSync"
+  // For a secrets finding this is the detection rule name (e.g.
+  // aws-access-key). For a dangerousSinks finding it's the sink itself
+  // (e.g. eval, execSync). Deliberately not written as `keyword: "value"`
+  // in this comment -- that exact shape once matched detectHardcodedSecrets'
+  // own generic-secret-assignment pattern when this file was scanned,
+  // producing a false positive from a comment describing the rule.
+  ruleId: string;
   hasDynamicArgument?: boolean; // only ever set for a dangerousSinks finding
 }
 
@@ -216,6 +222,35 @@ function exportedSymbolsForFile(graph: CodeGraph, fileId: string, exported: Set<
     .map((n) => (n as { name: string }).name);
 }
 
+// SAFETY: the top-3-by-risk files get their FULL raw source embedded
+// verbatim into the prompt (see the `source` field below) -- unlike
+// `security.secrets` itself, that raw source is not filtered for anything.
+// If one of those files also happens to contain a hardcoded secret (a real,
+// demonstrated scenario: a small fixture repo's only "interesting" file is
+// easily a top-3 risk), the model would otherwise see the literal secret
+// text sitting in its own context, and no prompt instruction can reliably
+// stop it from quoting that text back as "Evidence" in the generated report
+// -- which then gets posted as a public/org-visible GitHub comment. Telling
+// the model not to isn't a substitute for the model never seeing the value
+// in the first place, so every line `security.secrets` flagged for this
+// file is replaced with a placeholder BEFORE the source ever reaches
+// buildContextPack's caller (i.e. before it's serialized into the prompt),
+// independent of whatever grounding-rule instructions also exist.
+function redactSecretLines(source: string, filePath: string, secrets: SecurityFinding[]): string {
+  const secretLineNumbers = new Set(
+    secrets.filter((finding) => finding.file === filePath).map((finding) => finding.line)
+  );
+  if (secretLineNumbers.size === 0) return source;
+  return source
+    .split("\n")
+    .map((line, i) =>
+      secretLineNumbers.has(i + 1)
+        ? "[redacted: hardcoded-secret-shaped content removed before this reached the model -- see security.secrets for its ruleId/line]"
+        : line
+    )
+    .join("\n");
+}
+
 function buildSystemSummary(graph: CodeGraph): SystemSummary {
   const fileNodes = graph.nodes.filter((n) => n.kind === "file");
   const totalLoc = fileNodes.reduce(
@@ -281,7 +316,7 @@ export function buildContextPack(
         fanIn: s.fanIn,
         loc: s.loc,
         source: index < 3
-          ? (sourceByPath.get(s.fileId) ?? "")
+          ? redactSecretLines(sourceByPath.get(s.fileId) ?? "", paths.get(s.fileId) ?? s.fileId, security.secrets)
           : buildSignatureSummary(graph, s.fileId, exported),
         hasTests: tested.has(s.fileId),
         hasErrorHandling: hasErrorHandling(sourceByPath.get(s.fileId) ?? ""),

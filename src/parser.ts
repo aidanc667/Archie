@@ -431,14 +431,36 @@ function detectTsJsDangerousSink(
   node: Parser.SyntaxNode
 ): { sink: string; hasDynamicArgument: boolean } | undefined {
   if (node.type === "call_expression") {
-    const callee = tsJsCalleeName(node.childForFieldName("function"));
+    const functionField = node.childForFieldName("function");
+    const callee = tsJsCalleeName(functionField);
     if (!callee) return undefined;
     // eval(...) is flagged for ANY call regardless of argument shape -- eval
     // itself is the risk, not just a dynamic argument to it -- but
     // hasDynamicArgument is still computed from the actual argument so a
     // later severity pass can still tell `eval("fixed")` (discouraged) apart
     // from `eval(userInput)` (an actual injection risk).
-    if (callee === "eval" || TS_EXEC_SHELL_SINK_NAMES.has(callee)) {
+    if (callee === "eval") {
+      const args = namedArguments(node.childForFieldName("arguments"));
+      return {
+        sink: callee,
+        hasDynamicArgument: args.length === 0 ? true : hasDynamicArgumentTsJs(args[0]),
+      };
+    }
+    // execSync/exec are only flagged when called as a BARE identifier
+    // (`execSync(cmd)`, after a destructured `import { execSync } from
+    // "child_process"` -- the overwhelmingly common real shape), never as a
+    // member-expression call (`x.exec(...)`). Matching by member-expression
+    // property name alone (the same "match by name, don't resolve imports"
+    // heuristic used elsewhere in this file) produced a confirmed false
+    // positive on this codebase's OWN real source: `RegExp.prototype.exec()`
+    // (e.g. graph.ts's `/^module\s+(\S+)/m.exec(raw)` and
+    // `PY_TEST_PREFIX_RE.exec(basename)`) shares the exact method name
+    // "exec", and libraries like Mongoose use `.exec()` the same way. This
+    // narrowing trades a theoretical miss (`cp.execSync(...)` via a
+    // namespace import) for eliminating a much more common false-positive
+    // shape that would otherwise fabricate a Critical security finding via
+    // the report-generation escalation rule.
+    if (functionField?.type === "identifier" && TS_EXEC_SHELL_SINK_NAMES.has(callee)) {
       const args = namedArguments(node.childForFieldName("arguments"));
       return {
         sink: callee,

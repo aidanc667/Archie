@@ -545,6 +545,46 @@ describe("buildContextPack", () => {
     expect(pack.security).toEqual(security);
   });
 
+  // Critical safety test, added after an independent review found that a
+  // top-3-by-risk file's FULL raw source is embedded verbatim into the
+  // prompt regardless of whether security.secrets flagged a line in it --
+  // no prompt instruction reliably stops the model from quoting that raw
+  // text back as "Evidence" in the generated report, which then gets posted
+  // as a public/org-visible GitHub comment. This asserts the actual fix:
+  // the flagged line is redacted BEFORE it ever reaches the Context Pack,
+  // independent of any grounding-rule wording.
+  it("redacts a security.secrets-flagged line out of a top-3 file's full source before it reaches the Context Pack", () => {
+    const plantedSecret = "AKIAIOSFODNN7EXAMPLE";
+    const source = [
+      "// a.ts",
+      `const awsKey = "${plantedSecret}";`, // line 2 -- the flagged line
+      "export function unrelated() { return 1; }",
+    ].join("\n");
+
+    const security: SecurityReport = {
+      secrets: [{ file: "a.ts", line: 2, ruleId: "aws-access-key" }],
+      dangerousSinks: [],
+    };
+
+    const pack = buildContextPack(
+      makeGraph(),
+      makeScores(),
+      new Map([["file:a.ts", source]]),
+      { topN: 1, maxTokens: 50000 },
+      EMPTY_NAMING_CONSISTENCY,
+      EMPTY_DUPLICATION,
+      EMPTY_DEAD_FILES,
+      security
+    );
+
+    const embeddedSource = pack.topRiskFiles[0].source;
+    expect(embeddedSource).not.toContain(plantedSecret);
+    expect(embeddedSource).toContain("redacted");
+    // Unrelated lines in the same file must survive untouched -- this isn't
+    // wiping the whole file, just the one flagged line.
+    expect(embeddedSource).toContain("export function unrelated()");
+  });
+
   // Required test: a top-risk file's magicNumbers field is sourced from that
   // file's FileNode.magicNumbers (via the graph), defaulting to [] when the
   // FileNode has none set (older-style fixture, or a file with none found) --

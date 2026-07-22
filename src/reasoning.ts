@@ -142,7 +142,12 @@ includes the actual matched secret text, only which detection rule fired (\`rule
 location — e.g. "an AWS-access-key-shaped string was found in \`config.ts\` at line 12" or "a hardcoded
 credential-shaped assignment was found in \`db.ts\` at line 40" — you have not seen the actual value and must
 never invent, guess, or reconstruct what the secret's value might be, not even as an illustrative example or a
-plausible-looking placeholder. If \`security.secrets\` is empty, say nothing about hardcoded secrets at all;
+plausible-looking placeholder. This is not merely an instruction to withhold the value — a file's embedded
+\`source\` has any line \`security.secrets\` flagged already replaced with a \`[redacted: ...]\` placeholder before
+it ever reached you, so the real value is genuinely absent from what you're reading, not just something you're
+being asked not to repeat. If you see a \`[redacted: ...]\` marker inside a file's \`source\`, treat it as
+confirmation that line was a hardcoded-secret finding — cite the matching \`security.secrets\` entry by
+file/line/ruleId, never quote the placeholder text itself as if it were real code. If \`security.secrets\` is empty, say nothing about hardcoded secrets at all;
 if \`security.dangerousSinks\` is empty, say nothing about dangerous sinks at all — an empty array only means
 this run's heuristic found no candidate, not that the codebase has been verified secret-free or
 injection-free. A security claim

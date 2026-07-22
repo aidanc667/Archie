@@ -1254,6 +1254,16 @@ describe("SECURITY_GROUNDING_RULE", () => {
     expect(SECURITY_GROUNDING_RULE.toLowerCase()).toMatch(/topriskfiles/);
   });
 
+  // A secrets-flagged line is redacted out of a file's embedded `source`
+  // before the model ever sees it (see buildContextPack/redactSecretLines in
+  // src/summarizer.ts) -- the rule must tell the model what a `[redacted:`
+  // placeholder means so it cites the real security.secrets entry instead of
+  // quoting the placeholder text itself as if it were code.
+  it("explains that a [redacted: ...] marker in a file's source means the value is genuinely absent, not just withheld", () => {
+    expect(SECURITY_GROUNDING_RULE).toMatch(/\[redacted:/);
+    expect(SECURITY_GROUNDING_RULE.toLowerCase()).toMatch(/genuinely absent/);
+  });
+
   it("is included in the system prompt sent to Claude for all four passes", async () => {
     const fakeClient = makeFakeClient();
 
