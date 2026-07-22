@@ -14,15 +14,16 @@ describe("buildGraph", () => {
         {
           loc: 10,
           parsed: {
-            functions: [{ name: "doWork", startLine: 1, endLine: 3, isExported: true }],
+            functions: [{ name: "doWork", startLine: 1, endLine: 3, isExported: true, bodyHash: "abc123" }],
             classes: [],
             imports: ["./b"],
+            magicNumbers: [],
           },
         },
       ],
       [
         "/repo/src/b.ts",
-        { loc: 5, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 5, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
     ]);
 
@@ -42,6 +43,37 @@ describe("buildGraph", () => {
     expect(importEdges[0].confidence).toBe(1.0);
   });
 
+  // bodyHash is purely additive to ParsedFunction/FunctionNode -- buildGraph
+  // must copy it through to the graph's function node alongside the existing
+  // startLine/endLine/name fields, or every downstream duplicate-detection
+  // consumer of the graph would silently lose it despite parser.ts computing
+  // it correctly.
+  it("copies bodyHash from ParsedFunction through to the function node", () => {
+    const parsedByFile = new Map<string, { loc: number; parsed: ParsedFile }>([
+      [
+        "/repo/src/a.ts",
+        {
+          loc: 10,
+          parsed: {
+            functions: [
+              { name: "doWork", startLine: 1, endLine: 3, isExported: true, bodyHash: "deadbeef" },
+            ],
+            classes: [],
+            imports: [],
+            magicNumbers: [],
+          },
+        },
+      ],
+    ]);
+
+    const graph = buildGraph(parsedByFile, "/repo");
+
+    const functionNode = graph.nodes.find((n) => n.kind === "function");
+    expect(functionNode && "bodyHash" in functionNode ? functionNode.bodyHash : undefined).toBe(
+      "deadbeef"
+    );
+  });
+
   // Regression coverage for a false claim found on a real report: Archie
   // named four private helper functions as exported (claiming "13 exported
   // functions") because nothing tracked which functions/classes a file
@@ -56,14 +88,14 @@ describe("buildGraph", () => {
           loc: 20,
           parsed: {
             functions: [
-              { name: "publicFn", startLine: 1, endLine: 3, isExported: true },
-              { name: "privateFn", startLine: 5, endLine: 7, isExported: false },
+              { name: "publicFn", startLine: 1, endLine: 3, isExported: true, bodyHash: "h1" },
+              { name: "privateFn", startLine: 5, endLine: 7, isExported: false, bodyHash: "h2" },
             ],
             classes: [
               { name: "PublicClass", startLine: 9, endLine: 12, isExported: true },
               { name: "PrivateClass", startLine: 14, endLine: 16, isExported: false },
             ],
-            imports: [],
+            imports: [], magicNumbers: []
           },
         },
       ],
@@ -89,13 +121,13 @@ describe("buildGraph", () => {
           parsed: {
             functions: [],
             classes: [],
-            imports: ["./b.js"],
+            imports: ["./b.js"], magicNumbers: []
           },
         },
       ],
       [
         "/repo/src/b.ts",
-        { loc: 5, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 5, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
     ]);
 
@@ -117,13 +149,13 @@ describe("buildGraph", () => {
             functions: [],
             classes: [],
             // e.g. a value import and a separate type-only import from the same file
-            imports: ["./b", "./b"],
+            imports: ["./b", "./b"], magicNumbers: []
           },
         },
       ],
       [
         "/repo/src/b.ts",
-        { loc: 5, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 5, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
     ]);
 
@@ -139,11 +171,11 @@ describe("buildGraph", () => {
     const parsedByFile = new Map<string, { loc: number; parsed: ParsedFile }>([
       [
         "/repo/src/metrics.ts",
-        { loc: 20, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 20, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
       [
         "/repo/src/metrics.test.ts",
-        { loc: 15, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 15, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
     ]);
 
@@ -159,15 +191,15 @@ describe("buildGraph", () => {
     const parsedByFile = new Map<string, { loc: number; parsed: ParsedFile }>([
       [
         "/repo/src/walker.ts",
-        { loc: 20, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 20, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
       [
         "/repo/src/walker.spec.ts",
-        { loc: 15, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 15, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
       [
         "/repo/src/orphan.ts",
-        { loc: 5, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 5, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
     ]);
 
@@ -192,11 +224,11 @@ describe("buildGraph", () => {
     const parsedByFile = new Map<string, { loc: number; parsed: ParsedFile }>([
       [
         "/repo/src/lib/agents/portfolioRules.ts",
-        { loc: 20, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 20, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
       [
         "/repo/src/lib/agents/__tests__/portfolioRules.test.ts",
-        { loc: 15, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 15, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
     ]);
 
@@ -212,11 +244,11 @@ describe("buildGraph", () => {
     const parsedByFile = new Map<string, { loc: number; parsed: ParsedFile }>([
       [
         "/repo/app/page.tsx",
-        { loc: 10, parsed: { functions: [], classes: [], imports: ["@/components/Foo"] } },
+        { loc: 10, parsed: { functions: [], classes: [], imports: ["@/components/Foo"], magicNumbers: [] } },
       ],
       [
         "/repo/components/Foo.tsx",
-        { loc: 5, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 5, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
     ]);
 
@@ -236,11 +268,11 @@ describe("buildGraph", () => {
     const parsedByFile = new Map<string, { loc: number; parsed: ParsedFile }>([
       [
         "/repo/app/page.tsx",
-        { loc: 10, parsed: { functions: [], classes: [], imports: ["@/components/Foo"] } },
+        { loc: 10, parsed: { functions: [], classes: [], imports: ["@/components/Foo"], magicNumbers: [] } },
       ],
       [
         "/repo/components/Foo.tsx",
-        { loc: 5, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 5, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
     ]);
 
@@ -260,11 +292,11 @@ describe("buildGraph", () => {
     const parsedByFile = new Map<string, { loc: number; parsed: ParsedFile }>([
       [
         "/repo/main.py",
-        { loc: 10, parsed: { functions: [], classes: [], imports: ["foo.bar"] } },
+        { loc: 10, parsed: { functions: [], classes: [], imports: ["foo.bar"], magicNumbers: [] } },
       ],
       [
         "/repo/foo/bar.py",
-        { loc: 5, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 5, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
     ]);
 
@@ -280,7 +312,7 @@ describe("buildGraph", () => {
     const parsedByFile = new Map<string, { loc: number; parsed: ParsedFile }>([
       [
         "/repo/main.py",
-        { loc: 10, parsed: { functions: [], classes: [], imports: ["requests"] } },
+        { loc: 10, parsed: { functions: [], classes: [], imports: ["requests"], magicNumbers: [] } },
       ],
     ]);
 
@@ -305,13 +337,13 @@ describe("buildGraph", () => {
           parsed: {
             functions: [],
             classes: [],
-            imports: ["fmt", "github.com/acme/widget/helper"],
+            imports: ["fmt", "github.com/acme/widget/helper"], magicNumbers: []
           },
         },
       ],
       [
         "/repo/helper/helper.go",
-        { loc: 5, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 5, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
     ]);
 
@@ -329,12 +361,12 @@ describe("buildGraph", () => {
         "/repo/widget.go",
         {
           loc: 20,
-          parsed: { functions: [], classes: [], imports: ["github.com/acme/widget/helper"] },
+          parsed: { functions: [], classes: [], imports: ["github.com/acme/widget/helper"], magicNumbers: [] },
         },
       ],
       [
         "/repo/helper/helper.go",
-        { loc: 5, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 5, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
     ]);
 
@@ -353,11 +385,11 @@ describe("buildGraph", () => {
     const parsedByFile = new Map<string, { loc: number; parsed: ParsedFile }>([
       [
         "/repo/widget.go",
-        { loc: 20, parsed: { functions: [], classes: [], imports: [] } },
+        { loc: 20, parsed: { functions: [], classes: [], imports: [], magicNumbers: [] } },
       ],
       [
         "/repo/widget_test.go",
-        { loc: 10, parsed: { functions: [], classes: [], imports: ["testing"] } },
+        { loc: 10, parsed: { functions: [], classes: [], imports: ["testing"], magicNumbers: [] } },
       ],
     ]);
 

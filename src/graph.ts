@@ -292,9 +292,12 @@ function resolveImport(
 // directory as `<name>.go` -- unlike `.test.ts`/`.spec.ts` or `test_*.py`,
 // there's no separate "prefix" form to worry about, so a single suffix
 // alternative (mirroring the Python `_test.py` suffix case) is enough.
-const TEST_SUFFIX_RE = /(\.(test|spec)\.(ts|tsx|js|jsx)$)|((_test|\.test)\.py$)|(_test\.go$)/;
+// Exported so deadcode.ts can recognize test files using this exact same
+// convention as the TESTED_BY edges built below, instead of a second,
+// possibly-drifting copy of the same regexes.
+export const TEST_SUFFIX_RE = /(\.(test|spec)\.(ts|tsx|js|jsx)$)|((_test|\.test)\.py$)|(_test\.go$)/;
 
-const PY_TEST_PREFIX_RE = /^test_(.+)\.py$/;
+export const PY_TEST_PREFIX_RE = /^test_(.+)\.py$/;
 
 // Jest/RTL convention: tests live one directory below their source file, in
 // a sibling `__tests__/` directory (e.g. `agents/foo.ts` tested by
@@ -360,6 +363,7 @@ export function buildGraph(
         fileId,
         startLine: fn.startLine,
         endLine: fn.endLine,
+        bodyHash: fn.bodyHash,
       });
       edges.push({ type: "CONTAINS", from: fileId, to: fnId, confidence: 1.0 });
       // Distinct from CONTAINS: this is what lets a consumer ask "is this

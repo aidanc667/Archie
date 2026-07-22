@@ -164,7 +164,7 @@ describe("parseFile", () => {
   it("does not throw when a file cannot be read, returning an empty result instead", async () => {
     const nonexistentPath = path.resolve("fixtures/parser-basic/does-not-exist.ts");
     const result = await parseFile(nonexistentPath);
-    expect(result).toEqual({ functions: [], classes: [], imports: [] });
+    expect(result).toEqual({ functions: [], classes: [], imports: [], magicNumbers: [] });
   });
 });
 
@@ -198,5 +198,109 @@ describe("computeComplexity", () => {
     const filePath = path.resolve("fixtures/go-basic/widget.go");
     const complexity = await computeComplexity(filePath);
     expect(complexity).toBe(6);
+  });
+});
+
+describe("magic number extraction", () => {
+  it("does not flag a top-level `const NAME = <number>` declaration in TS", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.ts");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers.some((m) => m.value === "5")).toBe(false);
+  });
+
+  it("flags a number used inline in a condition", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.ts");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers).toContainEqual({ value: "42", line: 5 });
+  });
+
+  it("never flags 0, 1, or -1 used inline", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.ts");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers.some((m) => m.value === "0")).toBe(false);
+    expect(result.magicNumbers.some((m) => m.value === "1")).toBe(false);
+    expect(result.magicNumbers.some((m) => m.value === "-1")).toBe(false);
+  });
+
+  // Also pins the nesting check itself: a `const` declared INSIDE a function
+  // body is not "module/top level" just because it uses the `const` keyword
+  // -- TS/JS overload `const` for ordinary locals that are never reassigned,
+  // not just genuine named constants, so this codebase's exemption only
+  // applies to a `const` whose lexical_declaration has no function ancestor.
+  it("flags a TS local `const`'s value when the declaration is nested inside a function body", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.ts");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers).toContainEqual({ value: "99", line: 22 });
+  });
+
+  it("flags a number used as a function-call argument, not inside any declaration", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.ts");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers).toContainEqual({ value: "3000", line: 18 });
+  });
+
+  it("does not flag a Python module-level assignment, but flags a number used inline inside a function body", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.py");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers.some((m) => m.value === "5")).toBe(false);
+    expect(result.magicNumbers).toContainEqual({ value: "42", line: 6 });
+    expect(result.magicNumbers).toContainEqual({ value: "99", line: 12 });
+  });
+
+  // Unlike TS/JS's overloaded `const` (also used for plain, non-constant
+  // locals), Go's `const` keyword can ONLY declare a genuine named constant
+  // at any scope -- there is no separate "this local never changes but isn't
+  // really a constant" idiom the way TS/JS's `const` is used today. So Go's
+  // exemption intentionally has no top-level/nesting requirement, unlike the
+  // TS and Python cases above.
+  it("does not flag a Go `const Name = <number>` declaration at any scope, but flags a number used inline in a condition", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.go");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers.some((m) => m.value === "5")).toBe(false);
+    expect(result.magicNumbers.some((m) => m.value === "99")).toBe(false);
+    expect(result.magicNumbers).toContainEqual({ value: "42", line: 6 });
+  });
+});
+
+describe("bodyHash (structural duplicate detection)", () => {
+  // The actual motivating case: two functions that clamp a string to a max
+  // length, differing only in parameter/local names and the literal text of
+  // their error message and truncation suffix. Renamed identifiers and
+  // different string content must not affect the hash; the same builtin
+  // call (Number.isFinite) is a genuine structural match.
+  it("produces the same bodyHash for two functions with renamed params/locals, different string content, and the same builtin call", async () => {
+    const truncate = await parseFile(path.resolve("fixtures/body-hash/truncate.ts"));
+    const shorten = await parseFile(path.resolve("fixtures/body-hash/shorten.ts"));
+    const truncateFn = truncate.functions.find((f) => f.name === "truncateForDisplay");
+    const shortenFn = shorten.functions.find((f) => f.name === "shortenTitle");
+
+    expect(truncateFn?.bodyHash).toBeTruthy();
+    expect(truncateFn?.bodyHash).toBe(shortenFn?.bodyHash);
+  });
+
+  it("produces a different bodyHash for functions with genuinely different control flow", async () => {
+    const truncate = await parseFile(path.resolve("fixtures/body-hash/truncate.ts"));
+    const loop = await parseFile(path.resolve("fixtures/body-hash/different-control-flow.ts"));
+    const truncateFn = truncate.functions.find((f) => f.name === "truncateForDisplay");
+    const loopFn = loop.functions.find((f) => f.name === "clampWithLoop");
+
+    expect(truncateFn?.bodyHash).not.toBe(loopFn?.bodyHash);
+  });
+
+  it("produces a different bodyHash for same-shaped functions that call different builtins", async () => {
+    const numberVariant = await parseFile(path.resolve("fixtures/body-hash/uses-number-isfinite.ts"));
+    const arrayVariant = await parseFile(path.resolve("fixtures/body-hash/uses-array-isarray.ts"));
+    const numberFn = numberVariant.functions.find((f) => f.name === "guardNumber");
+    const arrayFn = arrayVariant.functions.find((f) => f.name === "guardArray");
+
+    expect(numberFn?.bodyHash).not.toBe(arrayFn?.bodyHash);
+  });
+
+  it("produces a valid hash for a function with zero parameters and a trivial one-line body, without crashing", async () => {
+    const trivial = await parseFile(path.resolve("fixtures/body-hash/trivial.ts"));
+    const trivialFn = trivial.functions.find((f) => f.name === "trivial");
+
+    expect(typeof trivialFn?.bodyHash).toBe("string");
+    expect(trivialFn?.bodyHash?.length).toBeGreaterThan(0);
   });
 });

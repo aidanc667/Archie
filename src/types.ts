@@ -13,6 +13,16 @@ export interface FunctionNode {
   fileId: string;
   startLine: number;
   endLine: number;
+  // Structural hash of the function's normalized body (identifiers
+  // positionally placeholdered, string/number literals collapsed) -- see
+  // parser.ts's computeBodyHash. Lets a duplicate-detection consumer match
+  // two functions that are shaped identically but use different parameter
+  // names, local variable names, and literal content. Optional, not
+  // required: summarizer.test.ts (owned by a different in-flight task in
+  // this same build, out of scope here) constructs FunctionNode literals
+  // directly without this field, and this addition must stay purely
+  // additive rather than forcing an unrelated file to change.
+  bodyHash?: string;
 }
 
 export interface ClassNode {
