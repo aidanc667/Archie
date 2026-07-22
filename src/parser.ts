@@ -186,14 +186,36 @@ function nodesEqual(a: Parser.SyntaxNode | null, b: Parser.SyntaxNode | null): b
   return a.equals(b);
 }
 
-function isAllowlistedNumericValue(node: Parser.SyntaxNode): boolean {
-  if (node.text === "0" || node.text === "1") return true;
-  if (node.text !== "1") return false;
+// The minus sign in a negative literal (e.g. `-40`) is never part of the
+// number node's own text in any of these three grammars -- it's a sibling
+// token inside a wrapping unary-minus node (verified empirically: TS/JS/Go
+// all use "unary_expression" with the "-" token as the first child and the
+// operand as the second; Python uses "unary_operator" with the same
+// two-child shape). Returns the node whose parent should actually be
+// inspected for "is this a named constant's value" purposes (the wrapper,
+// when present -- a declarator's `value` field points at the whole `-40`
+// expression, not the inner `40` literal) and the text that should be
+// recorded as the occurrence's value (with the sign restored). Every caller
+// that needs either of these must go through here rather than reading
+// node.text/node.parent directly, or it silently loses the sign the same
+// way this file's own const-exemption and occurrence-recording code
+// originally did.
+function unwrapUnaryMinus(node: Parser.SyntaxNode): { effectiveNode: Parser.SyntaxNode; text: string } {
   const parent = node.parent;
-  if (!parent || (parent.type !== "unary_expression" && parent.type !== "unary_operator")) {
-    return false;
+  if (
+    parent &&
+    (parent.type === "unary_expression" || parent.type === "unary_operator") &&
+    parent.childCount === 2 &&
+    parent.child(0)?.text === "-" &&
+    nodesEqual(parent.child(1), node)
+  ) {
+    return { effectiveNode: parent, text: `-${node.text}` };
   }
-  return parent.childCount === 2 && parent.child(0)?.text === "-" && nodesEqual(parent.child(1), node);
+  return { effectiveNode: node, text: node.text };
+}
+
+function isAllowlistedNumericValue(text: string): boolean {
+  return text === "0" || text === "1" || text === "-1";
 }
 
 // A `const`/module-level declaration's value is "already named" and should
@@ -299,6 +321,16 @@ function builtinIdentifiersFor(isPython: boolean, isGo: boolean): Set<string> {
   return isPython ? PY_BUILTIN_IDENTIFIERS : isGo ? GO_BUILTIN_IDENTIFIERS : TS_BUILTIN_IDENTIFIERS;
 }
 
+// A number/string leaf node whose parent is one of these types is playing
+// the role of a TYPE, not a value -- either the `number`/`string` keyword in
+// an ordinary type annotation (predefined_type), or a specific literal used
+// as a type constraint like `version: 6` (literal_type). Both wrap a leaf
+// node whose own node.type name collides with the real literal-expression
+// node types (verified empirically -- see the two call sites below), so
+// both need the same exemption or the type-level constraint gets
+// misidentified as an ordinary literal value.
+const TYPE_CONTEXT_PARENT_TYPES = new Set(["predefined_type", "literal_type"]);
+
 // Recursively flattens a function's AST subtree into a normalized token
 // sequence for structural hashing. Three deliberate collapses, in order:
 //
@@ -344,7 +376,7 @@ function collectTokens(
 ): void {
   if (node.type === "comment") return; // incidental to structure, not code shape
 
-  if ((numberTypes.has(node.type) || stringTypes.has(node.type)) && node.parent?.type === "predefined_type") {
+  if ((numberTypes.has(node.type) || stringTypes.has(node.type)) && TYPE_CONTEXT_PARENT_TYPES.has(node.parent?.type ?? "")) {
     tokens.push(node.type);
     return;
   }
@@ -462,17 +494,23 @@ async function parseFileUnsafe(filePath: string): Promise<ParsedFile> {
     // exempt" checks look at the number node's immediate AST context
     // (parent/ancestor), never at surrounding source text or indentation.
     //
-    // The predefined_type guard matters here for the same reason it matters
-    // in collectTokens: TS/JS's `: number` type-annotation keyword parses to
-    // a leaf node whose type is literally "number" -- the exact same
-    // node.type as a real numeric literal -- verified empirically by parsing
-    // a typed parameter and finding predefined_type > (leaf, type "number").
+    // The TYPE_CONTEXT_PARENT_TYPES guard matters here for the same reason
+    // it matters in collectTokens: TS/JS's `: number` type-annotation
+    // keyword parses to a leaf node whose type is literally "number" -- the
+    // exact same node.type as a real numeric literal -- verified empirically
+    // by parsing a typed parameter and finding predefined_type > (leaf, type
+    // "number"). A literal type used as a value constraint (e.g.
+    // `version: 6` in an interface) hits the same collision from a second
+    // angle -- verified empirically by parsing `interface Foo { version: 6 }`
+    // and finding type_annotation > literal_type > (leaf, type "number"), a
+    // distinct wrapper from predefined_type but the same underlying problem.
     // Without this guard, every numerically-typed parameter/return
-    // annotation in a TS file would get reported as a bogus "magic number"
-    // occurrence whose value is the literal text "number".
-    if (numberTypes.has(node.type) && node.parent?.type !== "predefined_type") {
-      if (!isAllowlistedNumericValue(node) && !isDeclaredConstantValue(node, isPython, isGo)) {
-        magicNumbers.push({ value: node.text, line: node.startPosition.row + 1 });
+    // annotation, or literal-type constraint, in a TS file would get
+    // reported as a bogus "magic number".
+    if (numberTypes.has(node.type) && !TYPE_CONTEXT_PARENT_TYPES.has(node.parent?.type ?? "")) {
+      const { effectiveNode, text } = unwrapUnaryMinus(node);
+      if (!isAllowlistedNumericValue(text) && !isDeclaredConstantValue(effectiveNode, isPython, isGo)) {
+        magicNumbers.push({ value: text, line: node.startPosition.row + 1 });
       }
     }
 

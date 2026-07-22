@@ -211,7 +211,7 @@ describe("magic number extraction", () => {
   it("flags a number used inline in a condition", async () => {
     const filePath = path.resolve("fixtures/magic-numbers/consts.ts");
     const result = await parseFile(filePath);
-    expect(result.magicNumbers).toContainEqual({ value: "42", line: 5 });
+    expect(result.magicNumbers).toContainEqual({ value: "42", line: 6 });
   });
 
   it("never flags 0, 1, or -1 used inline", async () => {
@@ -230,21 +230,64 @@ describe("magic number extraction", () => {
   it("flags a TS local `const`'s value when the declaration is nested inside a function body", async () => {
     const filePath = path.resolve("fixtures/magic-numbers/consts.ts");
     const result = await parseFile(filePath);
-    expect(result.magicNumbers).toContainEqual({ value: "99", line: 22 });
+    expect(result.magicNumbers).toContainEqual({ value: "99", line: 31 });
   });
 
   it("flags a number used as a function-call argument, not inside any declaration", async () => {
     const filePath = path.resolve("fixtures/magic-numbers/consts.ts");
     const result = await parseFile(filePath);
-    expect(result.magicNumbers).toContainEqual({ value: "3000", line: 18 });
+    expect(result.magicNumbers).toContainEqual({ value: "3000", line: 27 });
+  });
+
+  // A `const`'s value being negative (`const MIN_TEMP = -40`) must not
+  // defeat the const-exemption check: the declarator's `value` field points
+  // at the whole `-40` unary expression, not the inner `40` literal, so the
+  // const-detection logic has to unwrap through that wrapper to see it's
+  // still the declaration's own value.
+  it("does not flag a top-level TS `const`'s value even when it is negative", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.ts");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers.some((m) => m.value === "40" || m.value === "-40")).toBe(false);
+  });
+
+  // A negative number used inline (not inside any const) must be flagged
+  // WITH its sign -- the number node's own text never includes the minus
+  // (it's a sibling token), so recording node.text verbatim would silently
+  // report "273" for a `-273` in the source, which doesn't match what a
+  // reader would actually find on that line.
+  it("flags a negative number used inline, with the sign preserved", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.ts");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers).toContainEqual({ value: "-273", line: 13 });
+    expect(result.magicNumbers.some((m) => m.value === "273")).toBe(false);
+  });
+
+  // A literal type used as a value constraint (e.g. `version: 6` in an
+  // interface) parses to type_annotation > literal_type > (leaf, type
+  // "number") -- the same node.type collision predefined_type has with a
+  // real numeric literal, just one level further down. Without exempting
+  // literal_type too, a discriminated-union tag or version-literal field
+  // (a pattern this very codebase's own ArchieJsonOutput.version uses)
+  // would be misreported as a magic number.
+  it("does not flag a TS literal-type value used as a type constraint", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.ts");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers.some((m) => m.value === "6")).toBe(false);
   });
 
   it("does not flag a Python module-level assignment, but flags a number used inline inside a function body", async () => {
     const filePath = path.resolve("fixtures/magic-numbers/consts.py");
     const result = await parseFile(filePath);
     expect(result.magicNumbers.some((m) => m.value === "5")).toBe(false);
-    expect(result.magicNumbers).toContainEqual({ value: "42", line: 6 });
-    expect(result.magicNumbers).toContainEqual({ value: "99", line: 12 });
+    expect(result.magicNumbers).toContainEqual({ value: "42", line: 7 });
+    expect(result.magicNumbers).toContainEqual({ value: "99", line: 17 });
+  });
+
+  it("does not flag a negative Python module-level assignment, but flags a negative number used inline with its sign", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.py");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers.some((m) => m.value === "40" || m.value === "-40")).toBe(false);
+    expect(result.magicNumbers).toContainEqual({ value: "-273", line: 13 });
   });
 
   // Unlike TS/JS's overloaded `const` (also used for plain, non-constant
@@ -258,7 +301,14 @@ describe("magic number extraction", () => {
     const result = await parseFile(filePath);
     expect(result.magicNumbers.some((m) => m.value === "5")).toBe(false);
     expect(result.magicNumbers.some((m) => m.value === "99")).toBe(false);
-    expect(result.magicNumbers).toContainEqual({ value: "42", line: 6 });
+    expect(result.magicNumbers).toContainEqual({ value: "42", line: 7 });
+  });
+
+  it("does not flag a negative Go `const`'s value, but flags a negative number used inline with its sign", async () => {
+    const filePath = path.resolve("fixtures/magic-numbers/consts.go");
+    const result = await parseFile(filePath);
+    expect(result.magicNumbers.some((m) => m.value === "40" || m.value === "-40")).toBe(false);
+    expect(result.magicNumbers).toContainEqual({ value: "-273", line: 14 });
   });
 });
 

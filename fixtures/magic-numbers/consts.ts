@@ -1,11 +1,20 @@
 // fixtures/magic-numbers/consts.ts
 const MAX_RETRIES = 5;
+const MIN_TEMP = -40;
 
 export function checkThreshold(x: number): boolean {
   if (x > 42) {
     return true;
   }
   return false;
+}
+
+export function checkLowerBound(x: number): boolean {
+  return x < -273;
+}
+
+interface RunOutput {
+  version: 6;
 }
 
 export function allowlistedValues(x: number): number {
